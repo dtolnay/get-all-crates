@@ -85,7 +85,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
     let thread_pool = ThreadPoolBuilder::new().num_threads(num_threads).build()?;
 
     let crate_versions = Mutex::new(Vec::new());
-    let mut n_files = 0;
+    let mut n_crates = 0;
     thread_pool.in_place_scope(|scope| {
         for entry in WalkDir::new(&config.index_path)
             .max_depth(3)
@@ -104,7 +104,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
                 continue;
             }
 
-            n_files += 1;
+            n_crates += 1;
             scope.spawn(|_scope| {
                 let path = entry.into_path();
                 match get_crate_versions(&path) {
@@ -116,14 +116,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
     });
 
     let crate_versions = crate_versions.into_inner();
-
-    info!(
-        n_files,
-        n_download_targets = crate_versions.len(),
-        "collected {} total crate versions to download",
-        crate_versions.len()
-    );
-
+    info!(n_crates, n_versions = crate_versions.len(), "collected");
     Ok(crate_versions)
 }
 
