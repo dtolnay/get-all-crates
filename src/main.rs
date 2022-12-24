@@ -30,17 +30,14 @@ pub struct CrateVersion {
 
 /// Configuration for where to save the downloaded .crate files, and
 /// using what syntax for the output filenames.
-#[derive(Deserialize, Debug, Parser)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Debug, Parser)]
 pub struct OutputConfig {
     /// Directory where downloaded .crate files will be saved to.
     #[clap(short = 'o', long = "output-path", default_value = DEFAULT_OUTPUT_PATH)]
-    #[serde(default = "default_output_path")]
     pub path: PathBuf,
     /// Download files when if .crate file already exists in output dir for a
     /// given crate version, and overwrite the existing file with the new one.
     /// Default behavior is to skip downloading if .crate file already exists.
-    #[serde(default)]
     #[clap(long)]
     pub overwrite_existing: bool,
     /// What format to use for the output filenames. Works the same as
@@ -57,41 +54,33 @@ pub struct OutputConfig {
     pub format: Option<String>,
 }
 
-#[derive(Deserialize, Parser)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Parser)]
 pub struct HttpConfig {
     /// Value of user-agent HTTP header
-    #[serde(default = "default_user_agent")]
     #[clap(short = 'U', long, default_value = DEFAULT_USER_AGENT)]
     pub user_agent: String,
     /// Requests to registry server will not exceed this rate
-    #[serde(default = "default_requests_per_second")]
     #[clap(short = 'R', long, default_value_t = default_requests_per_second())]
     #[clap(value_name = "INT")]
     pub requests_per_second: NonZeroU32,
     /// Independent of the requests per second rate limit, no more
     /// than `max_concurrent_requests` will be in flight at any given
     /// moment.
-    #[serde(default = "default_max_concurrent_requests")]
     #[clap(short = 'M', long, default_value_t = default_max_concurrent_requests())]
     #[clap(value_name = "INT")]
     #[clap(alias = "max-concurrency", alias = "concurrency")]
-    #[serde(alias = "max-concurrency", alias = "concurrency")]
     pub max_concurrent_requests: NonZeroU32,
 }
 
-#[derive(Deserialize, Parser)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Parser)]
 pub struct TargetRegistryConfig {
     /// URL of the registry index we are downloading .crate files from. The
     /// program expects that it will be able to clone the index to a local
     /// temporary directory; the user must handle authentication if needed.
-    #[serde(default, alias = "registry-path")]
     #[clap(long, alias = "registry-url", value_name = "URL")]
     pub index_url: Option<String>,
     /// instead of an index url, just point to a local path where the index
     /// is already cloned.
-    #[serde(default, alias = "registry-path")]
     #[clap(long, conflicts_with = "index-url", alias = "registry-path")]
     #[clap(value_name = "PATH")]
     pub index_path: Option<PathBuf>,
@@ -99,13 +88,11 @@ pub struct TargetRegistryConfig {
     /// set to `true` in the `config.json` file), the token to include
     /// using the Authorization HTTP header.
     #[clap(short, long, alias = "token", value_name = "TOKEN")]
-    #[serde(default)]
     pub auth_token: Option<String>,
 }
 
 /// Download all .crate files from a registry server.
-#[derive(Deserialize, Parser, Debug)]
-#[serde(rename_all = "kebab-case")]
+#[derive(Parser, Debug)]
 #[clap(author, version, global_setting(clap::AppSettings::DeriveDisplayOrder))]
 pub struct Config {
     /// Crate registry location and authentication
@@ -116,45 +103,21 @@ pub struct Config {
     pub output: OutputConfig,
     /// Download settings
     #[clap(flatten)]
-    #[serde(default)]
     pub http: HttpConfig,
-    /// Specify configuration values using the provided TOML file, instead of
-    /// via command line flags. The values in the config file will override
-    /// any values passed as command line flags. See config.toml.sample for
-    /// syntax of the config file.
-    #[serde(default)]
-    #[clap(short, long, value_name = "PATH")]
-    #[clap(conflicts_with_all(&[
-        "index-url",
-        "index-path",
-        "auth-token",
-        "path",
-        "user-agent",
-        "requests-per-second",
-        "max-concurrent-requests",
-        "overwrite-existing",
-    ][..]))]
-    pub config_file: Option<PathBuf>,
 
     /// Only crates with names that match --filter-crate regex will be downloaded
-    #[serde(default)]
     #[clap(long, value_name = "REGEX", alias = "filter")]
     pub filter_crates: Option<String>,
 
     /// Don't actually download the .crate files, just list files which would be
     /// downloaded. Note: --requests-per-second and --max-concurrent-requests are
     /// still enforced even in --dry-mode!
-    #[serde(default)]
     #[clap(long)]
     pub dry_run: bool,
 }
 
 const DEFAULT_OUTPUT_PATH: &str = "output";
 const DEFAULT_USER_AGENT: &str = concat!("registry-backup/v", clap::crate_version!());
-
-fn default_output_path() -> PathBuf {
-    PathBuf::from(DEFAULT_OUTPUT_PATH)
-}
 
 fn default_user_agent() -> String {
     DEFAULT_USER_AGENT.to_string()
@@ -296,26 +259,6 @@ fn setup_logger() {
         .with_env_filter(env_filter)
         .with_ansi(true);
     builder.init();
-}
-
-async fn load_config_file(config: Config) -> Result<Config, AnyError> {
-    match config.config_file.as_ref() {
-        Some(path) => {
-            debug!(?path, "loading config file");
-            let toml = tokio::fs::read_to_string(&path).await?;
-            let config: Config = match toml::from_str(&toml) {
-                Ok(c) => c,
-                Err(e) => panic!(
-                    "\nfatal error: parsing config file at {} failed:\n\n{}\n\n",
-                    path.display(),
-                    e
-                ),
-            };
-            Ok(config)
-        }
-
-        None => Ok(config),
-    }
 }
 
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
@@ -617,7 +560,6 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> Resu
 }
 
 async fn run(config: Config) -> Result<(), AnyError> {
-    let config = load_config_file(config).await?;
     debug!("config:\n{:#?}\n", config);
 
     assert!(
@@ -666,15 +608,4 @@ fn main() {
     rt.block_on(run(config)).unwrap();
 
     info!("finished in {:?}", begin.elapsed());
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn parse_sample_config() {
-        const TOML: &str = include_str!("../config.toml.sample");
-        let _config: Config = toml::from_str(TOML).unwrap();
-    }
 }
