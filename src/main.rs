@@ -11,7 +11,6 @@ use std::fs::File;
 use std::io::{BufRead, BufReader, ErrorKind};
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -63,11 +62,7 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
         .unwrap_or(false)
 }
 
-fn get_crate_versions(
-    config: &Config,
-    path: PathBuf,
-    n_existing: &AtomicUsize,
-) -> anyhow::Result<Vec<CrateVersion>> {
+fn get_crate_versions(path: PathBuf) -> anyhow::Result<Vec<CrateVersion>> {
     let file = File::open(&path).map_err(|e| {
         error!(err = ?e, ?path, "failed to open file");
         e
@@ -80,14 +75,6 @@ fn get_crate_versions(
             error!(?path, "{},", e);
             e
         })?;
-
-        let vers_path = format!("{}/{}/download", vers.name, vers.vers);
-        let output_path = config.output_path.join(vers_path);
-        if output_path.exists() {
-            n_existing.fetch_add(1, Ordering::Relaxed);
-            continue;
-        }
-
         out.push(vers);
     }
     Ok(out)
@@ -119,32 +106,20 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
     let num_threads = thread::available_parallelism().map_or(1, NonZeroUsize::get);
     let thread_pool = ThreadPoolBuilder::new().num_threads(num_threads).build()?;
 
-    let n_existing = AtomicUsize::new(0);
     let crate_versions = Mutex::new(Vec::new());
     thread_pool.in_place_scope(|scope| {
         for path in files {
-            scope.spawn(
-                |_scope| match get_crate_versions(config, path, &n_existing) {
-                    Ok(vec) => crate_versions.lock().extend(vec),
-                    Err(err) => error!(?err, "parsing metadata failed, skipping file"),
-                },
-            );
+            scope.spawn(|_scope| match get_crate_versions(path) {
+                Ok(vec) => crate_versions.lock().extend(vec),
+                Err(err) => error!(?err, "parsing metadata failed, skipping file"),
+            });
         }
     });
 
-    let n_existing = n_existing.load(Ordering::Relaxed);
     let crate_versions = crate_versions.into_inner();
-
-    if n_existing > 0 {
-        warn!(
-            "skipped {} crate versions that were previously downloaded",
-            n_existing,
-        );
-    }
 
     info!(
         n_files,
-        n_existing,
         n_download_targets = crate_versions.len(),
         "collected {} total crate versions to download",
         crate_versions.len()
