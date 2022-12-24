@@ -8,7 +8,7 @@ use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
-use std::time::Instant;
+use std::time::{Duration, Instant};
 use tokio::io::AsyncBufReadExt;
 use tracing::{error, info, warn};
 use tracing_subscriber::filter::EnvFilter;
@@ -188,6 +188,10 @@ fn megabytes(bytes: usize) -> String {
     }
 }
 
+fn millis(duration: Duration) -> Duration {
+    Duration::from_millis(duration.as_millis() as u64)
+}
+
 async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyhow::Result<()> {
     let begin = Instant::now();
     ensure_dir_exists(&config.output_path).await?;
@@ -248,7 +252,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
                     crate = %vers.name,
                     version = %vers.vers,
                     size = %megabytes(body.len()),
-                    elapsed = ?req_begin.elapsed(),
+                    elapsed = ?millis(req_begin.elapsed()),
                 );
                 Ok(Some(output_path))
             }
@@ -284,7 +288,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
         n_skip,
         "finished downloading {} files in {:?}",
         n_ok,
-        begin.elapsed()
+        millis(begin.elapsed())
     );
 
     ret
@@ -306,7 +310,7 @@ fn main() -> anyhow::Result<()> {
     rt.block_on(async {
         let versions = get_crate_versions(&config).await?;
         download_versions(&config, versions).await?;
-        info!("finished in {:?}", begin.elapsed());
+        info!("finished in {:?}", millis(begin.elapsed()));
         Ok(())
     })
 }
