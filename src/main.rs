@@ -99,7 +99,7 @@ async fn get_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>
                 let mut lines = buf.lines();
                 'lines: while let Some(line) = lines.next_line().await? {
                     let vers: CrateVersion = serde_json::from_str(&line).map_err(|e| {
-                        error!(err = ?e, ?path, "failed to parse line");
+                        error!(?path, "{},", e);
                         e
                     })?;
 
