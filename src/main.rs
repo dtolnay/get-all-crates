@@ -6,12 +6,11 @@ use serde::Deserialize;
 use std::io::ErrorKind;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
-use std::str::from_utf8;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
 use std::time::Instant;
 use tokio::io::AsyncBufReadExt;
-use tracing::{debug, error, info, warn};
+use tracing::{error, info, warn};
 use tracing_subscriber::filter::EnvFilter;
 use url::Url;
 use walkdir::WalkDir;
@@ -72,9 +71,7 @@ async fn get_crate_versions(
         .filter_map(|res| match res {
             Ok(entry) => {
                 if entry.file_type().is_file() && entry.depth() >= 2 && entry.depth() <= 3 {
-                    let path = entry.into_path();
-                    debug!(?path, "found crate metadata file to parse");
-                    Some(path)
+                    Some(entry.into_path())
                 } else {
                     None
                 }
@@ -115,10 +112,6 @@ async fn get_crate_versions(
 
                     out.push(vers);
                 }
-                debug!(crate_name = %out.first().map(|x| x.name.as_str()).unwrap_or("na"),
-                    "parsed {} crate versions from metadata file", out.len()
-                );
-
                 Ok(out)
             }
         }))
@@ -234,7 +227,6 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
                 .join(name_lower)
                 .join(format!("{}-{}.crate", vers.name, vers.vers));
 
-            debug!(?url, "downloading...");
             let req = http_client.get(url);
             let resp = req.send().await?;
             let status = resp.status();
@@ -242,7 +234,6 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
 
             if !status.is_success() {
                 error!(status = ?status, "download failed");
-                debug!("response body:\n{}\n", from_utf8(&body.slice(..))?);
                 bail!("error response {:?} from server", status);
             } else {
                 // TODO: check if this path exists already before downloading
@@ -259,11 +250,11 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
                         e
                     })?;
                 info!(
-                        filesize = megabytes!(body.len()),
-                        crate_name = %vers.name,
-                        version = %vers.vers,
-                        "downloaded .crate file in {:?}", req_begin.elapsed());
-                debug!(?output_path, "wrote {} bytes to file", body.len());
+                    filesize = megabytes!(body.len()),
+                    crate_name = %vers.name,
+                    version = %vers.vers,
+                    "downloaded .crate file in {:?}", req_begin.elapsed(),
+                );
                 Ok(Some(output_path))
             }
         }
@@ -305,8 +296,6 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
 }
 
 async fn run(config: Config) -> anyhow::Result<()> {
-    debug!("config:\n{:#?}\n", config);
-
     let index_path = &config.index_path;
     let versions = get_crate_versions(&config, index_path).await?;
 
