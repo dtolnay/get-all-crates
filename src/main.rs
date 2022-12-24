@@ -45,12 +45,6 @@ pub struct Config {
     /// Only crates with names that match --filter-crate regex will be downloaded
     #[clap(long, value_name = "REGEX")]
     pub filter_crates: Option<String>,
-
-    /// Don't actually download the .crate files, just list files which would be
-    /// downloaded. Note: --requests-per-second and --max-concurrent-requests are
-    /// still enforced even in --dry-mode!
-    #[clap(long)]
-    pub dry_run: bool,
 }
 
 const fn default_max_concurrent_requests() -> NonZeroU32 {
@@ -284,11 +278,6 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
                 }))
                 .join(name_lower)
                 .join(format!("{}-{}.crate", vers.name, vers.vers));
-
-            if config.dry_run {
-                debug!(%url, "skipping download (--dry-run mode)");
-                return Ok(None);
-            }
 
             debug!(?url, "downloading...");
             let req = http_client.get(url);
