@@ -295,16 +295,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
     ret
 }
 
-async fn run(config: Config) -> anyhow::Result<()> {
-    let index_path = &config.index_path;
-    let versions = get_crate_versions(&config, index_path).await?;
-
-    download_versions(&config, versions).await?;
-
-    Ok(())
-}
-
-fn main() {
+fn main() -> anyhow::Result<()> {
     let begin = Instant::now();
 
     setup_logger();
@@ -315,10 +306,13 @@ fn main() {
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
-        .build()
-        .unwrap();
+        .build()?;
 
-    rt.block_on(run(config)).unwrap();
-
-    info!("finished in {:?}", begin.elapsed());
+    rt.block_on(async {
+        let index_path = &config.index_path;
+        let versions = get_crate_versions(&config, index_path).await?;
+        download_versions(&config, versions).await?;
+        info!("finished in {:?}", begin.elapsed());
+        Ok(())
+    })
 }
