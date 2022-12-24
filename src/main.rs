@@ -6,6 +6,7 @@ use pretty_toa::ThousandsSep;
 use rayon::ThreadPoolBuilder;
 use semver::Version;
 use serde::Deserialize;
+use serde_json::value::RawValue;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::ErrorKind;
@@ -64,10 +65,16 @@ fn is_hidden(entry: &DirEntry) -> bool {
 
 fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
     let content = fs::read(path)?;
-    serde_json::Deserializer::from_slice(&content)
-        .into_iter::<CrateVersion>()
-        .collect::<serde_json::Result<_>>()
-        .map_err(anyhow::Error::new)
+    let deserializer = serde_json::Deserializer::from_slice(&content);
+    let mut vec = Vec::new();
+    for line in deserializer.into_iter::<&RawValue>() {
+        let line = line?.get();
+        match serde_json::from_str(line) {
+            Ok(crate_version) => vec.push(crate_version),
+            Err(err) => error!(?path, "{},", err),
+        }
+    }
+    Ok(vec)
 }
 
 fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
