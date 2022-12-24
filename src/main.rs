@@ -41,29 +41,10 @@ pub struct Config {
     #[clap(short = 'M', long, default_value_t = default_max_concurrent_requests())]
     #[clap(value_name = "INT")]
     pub max_concurrent_requests: NonZeroU32,
-
-    /// Only crates with names that match --filter-crate regex will be downloaded
-    #[clap(long, value_name = "REGEX")]
-    pub filter_crates: Option<String>,
 }
 
 const fn default_max_concurrent_requests() -> NonZeroU32 {
     unsafe { NonZeroU32::new_unchecked(50) }
-}
-
-impl Config {
-    pub fn compile_filter(&self) -> anyhow::Result<Option<regex::Regex>> {
-        match self.filter_crates.as_ref() {
-            Some(regex) => {
-                let compiled = regex::Regex::new(regex).map_err(|e| {
-                    error!(%regex, err = ?e, "regex failed to compile: {}", e);
-                    e
-                })?;
-                Ok(Some(compiled))
-            }
-            None => Ok(None),
-        }
-    }
 }
 
 fn setup_logger() {
@@ -86,8 +67,6 @@ async fn get_crate_versions(
     config: &Config,
     clone_dir: &Path,
 ) -> anyhow::Result<Vec<CrateVersion>> {
-    let filter = config.compile_filter()?;
-    let mut n_excl = 0;
     let n_existing = Arc::new(AtomicUsize::new(0));
 
     let files: Vec<PathBuf> = walkdir::WalkDir::new(clone_dir)
@@ -98,15 +77,6 @@ async fn get_crate_versions(
             Ok(entry) => {
                 if entry.file_type().is_file() && entry.depth() >= 2 && entry.depth() <= 3 {
                     let path = entry.into_path();
-
-                    if let Some(filter) = filter.as_ref() {
-                        let crate_name = path.file_name().and_then(|x| x.to_str()).unwrap_or("");
-                        if !filter.is_match(crate_name.as_ref()) {
-                            n_excl += 1;
-                            return None;
-                        }
-                    }
-
                     debug!(?path, "found crate metadata file to parse");
                     Some(path)
                 } else {
@@ -122,15 +92,6 @@ async fn get_crate_versions(
 
     let n_files = files.len();
     info!("found {} crate metadata files to parse", n_files);
-
-    if n_excl > 0 {
-        warn!(
-            regex = %config.filter_crates.as_deref().unwrap_or(""),
-            n_files,
-            n_excl,
-            "--filter excluded {} crates", n_excl,
-        );
-    }
 
     let crate_versions: Vec<anyhow::Result<Vec<CrateVersion>>> =
         futures::stream::iter(files.into_iter().map(|path| {
@@ -191,7 +152,6 @@ async fn get_crate_versions(
 
     info!(
         n_files,
-        n_excl,
         n_existing,
         n_download_targets = crate_versions.len(),
         "collected {} total crate versions to download",
@@ -351,9 +311,6 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
 
 async fn run(config: Config) -> anyhow::Result<()> {
     debug!("config:\n{:#?}\n", config);
-
-    // verify regex compiles
-    let _ = config.compile_filter()?;
 
     let index_path = &config.index_path;
     let versions = get_crate_versions(&config, index_path).await?;
