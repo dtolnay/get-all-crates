@@ -20,84 +20,6 @@ use tracing_subscriber::filter::EnvFilter;
 
 type AnyError = Box<dyn std::error::Error>;
 
-// const CRATESIO_INDEX: &str = "https://github.com/rust-lang/crates.io-index.git";
-const CRATESIO_DL_URL: &str = "https://crates.io/api/v1/crates";
-
-/// type representing the schema of the config.json file
-/// placed at the root of the crate index repo.
-///
-/// e.g.
-///
-/// ```json,ignore
-/// {
-///   "dl": "https://crates.shipyard.rs/api/v1/crates",
-///   "api": "https://crates.shipyard.rs",
-///   "allowed-registries": ["https://github.com/rust-lang/crates.io-index"]
-/// }
-/// ```
-#[derive(Debug, Clone, Deserialize)]
-#[serde(rename_all = "kebab-case")]
-pub struct RegistryConfig {
-    pub dl: String,
-    pub api: String,
-    #[serde(default)]
-    pub allowed_registries: Vec<String>,
-    #[serde(default)]
-    pub auth_required: Option<bool>,
-}
-
-impl RegistryConfig {
-    pub fn is_crates_io(&self) -> bool {
-        self.dl == CRATESIO_DL_URL
-    }
-
-    pub fn get_dl_url(&self, name: &str, version: &str, cksum: &str) -> String {
-        const TEMPLATE_KEYS: [&str; 5] = [
-            "{crate}",
-            "{version}",
-            "{prefix}",
-            "{lowerprefix}",
-            "{sha256-checksum}",
-        ];
-
-        if self.is_crates_io() {
-            // instead of following 302 redirect from /api endpoint, just preemptively
-            // get the static cdn url
-            format!(
-                "https://static.crates.io/crates/{name}/{name}-{version}.crate",
-                name = name,
-                version = version,
-            )
-        } else if TEMPLATE_KEYS.iter().any(|k| self.dl.contains(k)) {
-            let mut out = self.dl.clone();
-
-            if self.dl.contains("{prefix}") {
-                let prefix = relative_index_file_helper(name).join("/");
-                out = out.replace("{prefix}", &prefix);
-            }
-
-            if self.dl.contains("{lowerprefix}") {
-                let prefix = relative_index_file_helper(&name.to_lowercase()).join("/");
-                out = out.replace("{lowerprefix}", &prefix);
-            }
-
-            out = out.replace("{crate}", name);
-            out = out.replace("{version}", version);
-            out = out.replace("{sha256-checksum}", cksum);
-            out
-        } else {
-            Path::new(&self.dl)
-                .join(&format!(
-                    "{name}/{version}/download",
-                    name = name,
-                    version = version,
-                ))
-                .display()
-                .to_string()
-        }
-    }
-}
-
 /// One version per line in the index metadata files.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CrateVersion {
@@ -396,12 +318,6 @@ async fn load_config_file(config: Config) -> Result<Config, AnyError> {
     }
 }
 
-async fn load_registry_config(clone_dir: &Path) -> Result<RegistryConfig, AnyError> {
-    let json = tokio::fs::read_to_string(clone_dir.join("config.json")).await?;
-    let parsed = serde_json::from_str(&json)?;
-    Ok(parsed)
-}
-
 fn is_hidden(entry: &walkdir::DirEntry) -> bool {
     entry
         .file_name()
@@ -557,37 +473,6 @@ async fn ensure_file_parent_dir_exists<P: AsRef<std::path::Path>>(path: P) -> Re
     }
 }
 
-// relative_index_* fns taken from rust-lang/crates.io source code
-
-/// Returns the relative path to the crate index file.
-/// Does not perform conversion to lowercase.
-fn relative_index_file_helper(name: &str) -> Vec<&str> {
-    match name.len() {
-        1 => vec!["1", name],
-        2 => vec!["2", name],
-        3 => vec!["3", &name[..1], name],
-        _ => vec![&name[0..2], &name[2..4], name],
-    }
-}
-
-// /// Returns the relative path to the crate index file that corresponds to
-// /// the given crate name as a path (i.e. with platform-dependent folder separators).
-// ///
-// /// see <https://doc.rust-lang.org/cargo/reference/registries.html#index-format>
-// fn relative_index_file(name: &str) -> PathBuf {
-//     let name = name.to_lowercase();
-//     Self::relative_index_file_helper(&name).iter().collect()
-// }
-//
-// /// Returns the relative path to the crate index file that corresponds to
-// /// the given crate name for usage in URLs (i.e. with `/` separator).
-// ///
-// /// see <https://doc.rust-lang.org/cargo/reference/registries.html#index-format>
-// fn relative_index_file_for_url(name: &str) -> String {
-//     let name = name.to_lowercase();
-//     Self::relative_index_file_helper(&name).join("/")
-// }
-
 macro_rules! megabytes {
     ($x:expr) => {{
         use pretty_toa::ThousandsSep;
@@ -606,24 +491,11 @@ macro_rules! megabytes {
     }};
 }
 
-async fn download_versions(
-    config: &Config,
-    registry_config: &RegistryConfig,
-    versions: Vec<CrateVersion>,
-) -> Result<(), AnyError> {
+async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> Result<(), AnyError> {
     let begin = Instant::now();
     ensure_dir_exists(&config.output.path).await?;
 
     let rate_limit = RateLimiter::direct(Quota::per_second(config.http.requests_per_second));
-
-    // piggy back on Registry Config's url template functionality
-    // to render the relative output path
-    let output_config = RegistryConfig {
-        dl: config.output.format.as_deref().unwrap_or("").to_string(),
-        api: String::new(),
-        allowed_registries: vec![],
-        auth_required: None,
-    };
 
     let http_client = reqwest::Client::builder()
         .user_agent(&config.http.user_agent)
@@ -639,17 +511,26 @@ async fn download_versions(
     let inner_stream = futures::stream::iter(versions.into_iter().map(|vers| {
         let req_begin = Instant::now();
         let http_client = http_client.clone();
-        let output_config = &output_config;
 
         async move {
-            let url =
-                url::Url::parse(&registry_config.get_dl_url(&vers.name, &vers.vers, &vers.cksum))?;
+            let url = url::Url::parse(&format!(
+                "https://static.crates.io/crates/{name}/{name}-{version}.crate",
+                name = vers.name,
+                version = vers.vers,
+            ))?;
 
-            let output_path = config.output.path.join(output_config.get_dl_url(
-                &vers.name,
-                &vers.vers,
-                &vers.cksum,
-            ));
+            let name_lower = vers.name.to_ascii_lowercase();
+            let output_path = config
+                .output
+                .path
+                .join(PathBuf::from_iter(match name_lower.len() {
+                    1 => vec!["1"],
+                    2 => vec!["2"],
+                    3 => vec!["3", &name_lower[..1]],
+                    _ => vec![&name_lower[0..2], &name_lower[2..4]],
+                }))
+                .join(name_lower)
+                .join(format!("{}-{}.crate", vers.name, vers.vers));
 
             if config.dry_run {
                 debug!(%url, "skipping download (--dry-run mode)");
@@ -761,11 +642,9 @@ async fn run(config: Config) -> Result<(), AnyError> {
         _ => unreachable!(),
     };
 
-    let registry_config = load_registry_config(index_path).await?;
-
     let versions = get_crate_versions(&config, index_path).await?;
 
-    download_versions(&config, &registry_config, versions).await?;
+    download_versions(&config, versions).await?;
 
     Ok(())
 }
@@ -797,56 +676,5 @@ mod tests {
     fn parse_sample_config() {
         const TOML: &str = include_str!("../config.toml.sample");
         let _config: Config = toml::from_str(TOML).unwrap();
-    }
-
-    #[test]
-    fn sanity_check_url_template_rendering() {
-        let config = RegistryConfig {
-            dl: "{prefix}__{lowerprefix}__{sha256-checksum}__{crate}__{version}.tar.gz".to_string(),
-            api: String::new(),
-            allowed_registries: vec![],
-            auth_required: Some(true),
-        };
-
-        assert_eq!(
-            config.get_dl_url("iM-14yo-LoL", "0.69.42-rc.123", "c5b6fc73"),
-            "iM/-1/iM-14yo-LoL__im/-1/im-14yo-lol__c5b6fc73__iM-14yo-LoL__0.69.42-rc.123.tar.gz",
-        );
-    }
-
-    #[test]
-    fn sanity_check_url_template_used_for_output_path() {
-        let config = RegistryConfig {
-            dl: "{crate}/{sha256-checksum}".to_string(),
-            api: String::new(),
-            allowed_registries: vec![],
-            auth_required: Some(true),
-        };
-
-        let output_path =
-            Path::new("output").join(config.get_dl_url("lazy-static", "1.0.0", "x7b2z899"));
-
-        assert_eq!(output_path, Path::new("output/lazy-static/x7b2z899"),);
-    }
-
-    #[test]
-    fn verify_blank_url_template_works_same_as_default() {
-        let c1 = RegistryConfig {
-            dl: "{crate}/{version}/download".to_string(),
-            api: String::new(),
-            allowed_registries: vec![],
-            auth_required: Some(true),
-        };
-        let mut c2 = c1.clone();
-        c2.dl = "".to_string();
-
-        assert_eq!(
-            c1.get_dl_url("lazy-static", "1.0.0", "x7b2z899"),
-            c2.get_dl_url("lazy-static", "1.0.0", "x7b2z899"),
-        );
-        assert_eq!(
-            Path::new("output").join(c1.get_dl_url("lazy-static", "1.0.0", "x7b2z899")),
-            Path::new("output/lazy-static/1.0.0/download"),
-        );
     }
 }
