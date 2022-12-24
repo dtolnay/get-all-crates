@@ -61,7 +61,37 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
         .unwrap_or(false)
 }
 
-async fn get_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
+async fn get_crate_versions(
+    config: &Config,
+    path: PathBuf,
+    n_existing: &AtomicUsize,
+) -> anyhow::Result<Vec<CrateVersion>> {
+    let file = tokio::fs::File::open(&path).await.map_err(|e| {
+        error!(err = ?e, ?path, "failed to open file");
+        e
+    })?;
+    let buf = tokio::io::BufReader::new(file);
+    let mut out = Vec::new();
+    let mut lines = buf.lines();
+    'lines: while let Some(line) = lines.next_line().await? {
+        let vers: CrateVersion = serde_json::from_str(&line).map_err(|e| {
+            error!(?path, "{},", e);
+            e
+        })?;
+
+        let vers_path = format!("{}/{}/download", vers.name, vers.vers);
+        let output_path = config.output_path.join(vers_path);
+        if output_path.exists() {
+            n_existing.fetch_add(1, Ordering::Relaxed);
+            continue 'lines;
+        }
+
+        out.push(vers);
+    }
+    Ok(out)
+}
+
+async fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
     let files: Vec<PathBuf> = WalkDir::new(&config.index_path)
         .max_depth(3)
         .into_iter()
@@ -85,38 +115,14 @@ async fn get_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>
     info!("found {} crate metadata files to parse", n_files);
 
     let n_existing = AtomicUsize::new(0);
-    let crate_versions: Vec<anyhow::Result<Vec<CrateVersion>>> =
-        futures::stream::iter(files.into_iter().map(|path| {
-            let n_existing = &n_existing;
-            async move {
-                let file = tokio::fs::File::open(&path).await.map_err(|e| {
-                    error!(err = ?e, ?path, "failed to open file");
-                    e
-                })?;
-                let buf = tokio::io::BufReader::new(file);
-                let mut out = Vec::new();
-                let mut lines = buf.lines();
-                'lines: while let Some(line) = lines.next_line().await? {
-                    let vers: CrateVersion = serde_json::from_str(&line).map_err(|e| {
-                        error!(?path, "{},", e);
-                        e
-                    })?;
-
-                    let vers_path = format!("{}/{}/download", vers.name, vers.vers);
-                    let output_path = config.output_path.join(vers_path);
-                    if output_path.exists() {
-                        n_existing.fetch_add(1, Ordering::Relaxed);
-                        continue 'lines;
-                    }
-
-                    out.push(vers);
-                }
-                Ok(out)
-            }
-        }))
-        .buffer_unordered(thread::available_parallelism().map_or(1, NonZeroUsize::get))
-        .collect()
-        .await;
+    let crate_versions: Vec<anyhow::Result<Vec<CrateVersion>>> = futures::stream::iter(
+        files
+            .into_iter()
+            .map(|path| get_crate_versions(config, path, &n_existing)),
+    )
+    .buffer_unordered(thread::available_parallelism().map_or(1, NonZeroUsize::get))
+    .collect()
+    .await;
 
     let n_existing = n_existing.load(Ordering::Relaxed);
 
@@ -319,7 +325,7 @@ fn main() -> anyhow::Result<()> {
         .build()?;
 
     rt.block_on(async {
-        let versions = get_crate_versions(&config).await?;
+        let versions = get_all_crate_versions(&config).await?;
         if false {
             download_versions(&config, versions).await?;
         }
