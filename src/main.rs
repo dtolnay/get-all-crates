@@ -29,7 +29,7 @@ pub struct CrateVersion {
 #[derive(Debug, Parser)]
 pub struct OutputConfig {
     /// Directory where downloaded .crate files will be saved to.
-    #[clap(short = 'o', long = "output-path", default_value = DEFAULT_OUTPUT_PATH)]
+    #[clap(short = 'o', long = "output-path")]
     pub path: PathBuf,
     /// Download files when if .crate file already exists in output dir for a
     /// given crate version, and overwrite the existing file with the new one.
@@ -111,7 +111,6 @@ pub struct Config {
     pub dry_run: bool,
 }
 
-const DEFAULT_OUTPUT_PATH: &str = "output";
 const DEFAULT_USER_AGENT: &str = concat!("registry-backup/v", clap::crate_version!());
 
 const fn default_requests_per_second() -> NonZeroU32 {
