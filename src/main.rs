@@ -27,11 +27,6 @@ pub struct OutputConfig {
     /// Directory where downloaded .crate files will be saved to.
     #[clap(short = 'o', long = "output-path")]
     pub path: PathBuf,
-    /// Download files when if .crate file already exists in output dir for a
-    /// given crate version, and overwrite the existing file with the new one.
-    /// Default behavior is to skip downloading if .crate file already exists.
-    #[clap(long)]
-    pub overwrite_existing: bool,
     /// What format to use for the output filenames. Works the same as
     /// Cargo's registry syntax for the "dl" key in the `config.json`
     /// file in a reigstry index. See [Cargo
@@ -99,10 +94,6 @@ const fn default_max_concurrent_requests() -> NonZeroU32 {
 }
 
 impl Config {
-    pub fn skip_existing(&self) -> bool {
-        !self.output.overwrite_existing
-    }
-
     pub fn compile_filter(&self) -> anyhow::Result<Option<regex::Regex>> {
         match self.filter_crates.as_ref() {
             Some(regex) => {
@@ -225,13 +216,11 @@ async fn get_crate_versions(
                         e
                     })?;
 
-                    if config.skip_existing() {
-                        let vers_path = format!("{}/{}/download", vers.name, vers.vers);
-                        let output_path = config.output.path.join(vers_path);
-                        if output_path.exists() {
-                            n_existing.fetch_add(1, Ordering::Relaxed);
-                            continue 'lines;
-                        }
+                    let vers_path = format!("{}/{}/download", vers.name, vers.vers);
+                    let output_path = config.output.path.join(vers_path);
+                    if output_path.exists() {
+                        n_existing.fetch_add(1, Ordering::Relaxed);
+                        continue 'lines;
                     }
 
                     out.push(vers);
