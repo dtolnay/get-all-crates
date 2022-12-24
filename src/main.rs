@@ -58,13 +58,10 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
         .unwrap_or(false)
 }
 
-async fn get_crate_versions(
-    config: &Config,
-    clone_dir: &Path,
-) -> anyhow::Result<Vec<CrateVersion>> {
+async fn get_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
     let n_existing = Arc::new(AtomicUsize::new(0));
 
-    let files: Vec<PathBuf> = WalkDir::new(clone_dir)
+    let files: Vec<PathBuf> = WalkDir::new(&config.index_path)
         .max_depth(3)
         .into_iter()
         .filter_entry(|e| !is_hidden(e))
@@ -309,8 +306,7 @@ fn main() -> anyhow::Result<()> {
         .build()?;
 
     rt.block_on(async {
-        let index_path = &config.index_path;
-        let versions = get_crate_versions(&config, index_path).await?;
+        let versions = get_crate_versions(&config).await?;
         download_versions(&config, versions).await?;
         info!("finished in {:?}", begin.elapsed());
         Ok(())
