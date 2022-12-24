@@ -35,13 +35,8 @@ pub struct Config {
     pub output_path: PathBuf,
 
     /// Limit number of concurrent requests in flight
-    #[clap(short = 'j', default_value_t = default_max_concurrent_requests())]
-    #[clap(value_name = "INT")]
+    #[clap(short = 'j', value_name = "INT", default_value = "50")]
     pub max_concurrent_requests: NonZeroU32,
-}
-
-const fn default_max_concurrent_requests() -> NonZeroU32 {
-    unsafe { NonZeroU32::new_unchecked(50) }
 }
 
 fn setup_logger() {
