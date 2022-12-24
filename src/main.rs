@@ -64,7 +64,6 @@ pub struct HttpConfig {
     /// moment.
     #[clap(short = 'M', long, default_value_t = default_max_concurrent_requests())]
     #[clap(value_name = "INT")]
-    #[clap(alias = "max-concurrency", alias = "concurrency")]
     pub max_concurrent_requests: NonZeroU32,
 }
 
@@ -73,17 +72,17 @@ pub struct TargetRegistryConfig {
     /// URL of the registry index we are downloading .crate files from. The
     /// program expects that it will be able to clone the index to a local
     /// temporary directory; the user must handle authentication if needed.
-    #[clap(long, alias = "registry-url", value_name = "URL")]
+    #[clap(long, value_name = "URL")]
     pub index_url: Option<String>,
     /// instead of an index url, just point to a local path where the index
     /// is already cloned.
-    #[clap(long, conflicts_with = "index-url", alias = "registry-path")]
+    #[clap(long, conflicts_with = "index-url")]
     #[clap(value_name = "PATH")]
     pub index_path: Option<PathBuf>,
     /// If registry requires authorization (i.e. "auth-required" key is
     /// set to `true` in the `config.json` file), the token to include
     /// using the Authorization HTTP header.
-    #[clap(short, long, alias = "token", value_name = "TOKEN")]
+    #[clap(short, long, value_name = "TOKEN")]
     pub auth_token: Option<String>,
 }
 
@@ -102,7 +101,7 @@ pub struct Config {
     pub http: HttpConfig,
 
     /// Only crates with names that match --filter-crate regex will be downloaded
-    #[clap(long, value_name = "REGEX", alias = "filter")]
+    #[clap(long, value_name = "REGEX")]
     pub filter_crates: Option<String>,
 
     /// Don't actually download the .crate files, just list files which would be
