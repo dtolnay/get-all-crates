@@ -114,10 +114,6 @@ pub struct Config {
 const DEFAULT_OUTPUT_PATH: &str = "output";
 const DEFAULT_USER_AGENT: &str = concat!("registry-backup/v", clap::crate_version!());
 
-fn default_user_agent() -> String {
-    DEFAULT_USER_AGENT.to_string()
-}
-
 const fn default_requests_per_second() -> NonZeroU32 {
     unsafe { NonZeroU32::new_unchecked(100) }
 }
@@ -158,7 +154,7 @@ impl std::fmt::Debug for TargetRegistryConfig {
 impl Default for HttpConfig {
     fn default() -> Self {
         Self {
-            user_agent: default_user_agent(),
+            user_agent: DEFAULT_USER_AGENT.to_owned(),
             requests_per_second: default_requests_per_second(),
             max_concurrent_requests: default_max_concurrent_requests(),
         }
