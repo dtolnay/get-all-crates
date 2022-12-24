@@ -19,27 +19,28 @@ use walkdir::WalkDir;
 const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
 
 #[derive(Deserialize)]
-pub struct CrateVersion {
-    pub name: String,
-    pub vers: String,
-    pub cksum: String,
+struct CrateVersion {
+    name: String,
+    vers: String,
+    #[allow(dead_code)]
+    cksum: String,
 }
 
 /// Download all .crate files from a registry server.
 #[derive(Parser)]
 #[command(author, version)]
-pub struct Config {
+struct Config {
     /// Local path where the crates.io-index is already cloned
     #[arg(long = "index", value_name = "PATH")]
-    pub index_path: PathBuf,
+    index_path: PathBuf,
 
     /// Directory in which to put downloaded .crate files
     #[arg(long = "out", value_name = "PATH")]
-    pub output_path: PathBuf,
+    output_path: PathBuf,
 
     /// Limit number of concurrent requests in flight
     #[arg(short = 'j', value_name = "INT", default_value = "50")]
-    pub max_concurrent_requests: NonZeroU32,
+    max_concurrent_requests: NonZeroU32,
 }
 
 fn setup_logger() {
