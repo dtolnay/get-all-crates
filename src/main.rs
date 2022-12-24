@@ -26,19 +26,16 @@ pub struct CrateVersion {
 #[derive(Parser, Debug)]
 #[clap(author, version, global_setting(clap::AppSettings::DeriveDisplayOrder))]
 pub struct Config {
-    /// instead of an index url, just point to a local path where the index
-    /// is already cloned.
-    #[clap(long, value_name = "PATH")]
+    /// Local path where the crates.io-index is already cloned
+    #[clap(long = "index", value_name = "PATH")]
     pub index_path: PathBuf,
 
-    /// Directory where downloaded .crate files will be saved to.
-    #[clap(short = 'o')]
+    /// Directory in which to put downloaded .crate files
+    #[clap(long = "out", value_name = "PATH")]
     pub output_path: PathBuf,
 
-    /// Independent of the requests per second rate limit, no more
-    /// than `max_concurrent_requests` will be in flight at any given
-    /// moment.
-    #[clap(short = 'M', long, default_value_t = default_max_concurrent_requests())]
+    /// Limit number of concurrent requests in flight
+    #[clap(short = 'j', default_value_t = default_max_concurrent_requests())]
     #[clap(value_name = "INT")]
     pub max_concurrent_requests: NonZeroU32,
 }
