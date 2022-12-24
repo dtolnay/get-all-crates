@@ -18,8 +18,7 @@ use walkdir::WalkDir;
 
 const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
 
-/// One version per line in the index metadata files.
-#[derive(Debug, Clone, Deserialize)]
+#[derive(Deserialize)]
 pub struct CrateVersion {
     pub name: String,
     pub vers: String,
@@ -27,7 +26,7 @@ pub struct CrateVersion {
 }
 
 /// Download all .crate files from a registry server.
-#[derive(Parser, Debug)]
+#[derive(Parser)]
 #[command(author, version)]
 pub struct Config {
     /// Local path where the crates.io-index is already cloned
