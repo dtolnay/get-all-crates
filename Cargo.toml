@@ -9,7 +9,7 @@ repository = "https://github.com/dtolnay/get-all-crates"
 
 [dependencies]
 anyhow = "1"
-clap = { version = "3.1", default-features = false, features = ["std", "derive", "cargo", "color", "deprecated"] }
+clap = { version = "4", default-features = false, features = ["cargo", "color", "derive", "deprecated", "help", "std", "usage"] }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1.0.69"
 tracing = "0.1.29"

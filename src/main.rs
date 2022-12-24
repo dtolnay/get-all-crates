@@ -1,5 +1,5 @@
 use anyhow::bail;
-use clap::{AppSettings, Parser};
+use clap::Parser;
 use futures::stream::StreamExt;
 use pretty_toa::ThousandsSep;
 use serde::Deserialize;
@@ -27,18 +27,18 @@ pub struct CrateVersion {
 
 /// Download all .crate files from a registry server.
 #[derive(Parser, Debug)]
-#[clap(author, version, global_setting(AppSettings::DeriveDisplayOrder))]
+#[command(author, version)]
 pub struct Config {
     /// Local path where the crates.io-index is already cloned
-    #[clap(long = "index", value_name = "PATH")]
+    #[arg(long = "index", value_name = "PATH")]
     pub index_path: PathBuf,
 
     /// Directory in which to put downloaded .crate files
-    #[clap(long = "out", value_name = "PATH")]
+    #[arg(long = "out", value_name = "PATH")]
     pub output_path: PathBuf,
 
     /// Limit number of concurrent requests in flight
-    #[clap(short = 'j', value_name = "INT", default_value = "50")]
+    #[arg(short = 'j', value_name = "INT", default_value = "50")]
     pub max_concurrent_requests: NonZeroU32,
 }
 
