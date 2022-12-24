@@ -1,12 +1,12 @@
 [package]
 name = "get-all-crates"
-authors = ["David Tolnay <dtolnay@gmail.com>"]
 version = "0.0.0"
+authors = ["David Tolnay <dtolnay@gmail.com>"]
+description = "Download .crate files of all version of all crates from crates.io"
 edition = "2021"
+license = "MIT"
 readme = "README.md"
 repository = "https://github.com/dtolnay/get-all-crates"
-license = "MIT"
-description = "Download .crate files of all version of all crates from crates.io"
 
 [dependencies]
 clap = { version = "3.1", default-features = false, features = ["std", "derive", "cargo", "color"] }
