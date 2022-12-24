@@ -321,7 +321,9 @@ fn main() -> anyhow::Result<()> {
 
     rt.block_on(async {
         let versions = get_crate_versions(&config).await?;
-        download_versions(&config, versions).await?;
+        if false {
+            download_versions(&config, versions).await?;
+        }
         info!("finished in {:?}", millis(begin.elapsed()));
         Ok(())
     })
