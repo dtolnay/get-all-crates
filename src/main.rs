@@ -87,7 +87,7 @@ pub struct Config {
     pub dry_run: bool,
 }
 
-const DEFAULT_USER_AGENT: &str = concat!("registry-backup/v", clap::crate_version!());
+const DEFAULT_USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
 
 const fn default_max_concurrent_requests() -> NonZeroU32 {
     unsafe { NonZeroU32::new_unchecked(50) }
