@@ -173,21 +173,19 @@ async fn ensure_file_parent_dir_exists(path: &Path) -> anyhow::Result<()> {
     }
 }
 
-macro_rules! megabytes {
-    ($x:expr) => {{
-        let mb = $x as f64 / 1024.0 / 1024.0;
-        if mb > 2048.0 {
-            format!(
-                "{}G",
-                (((mb / 1024.0) * 100.0).round() / 100.0).thousands_sep()
-            )
-        } else if mb < 0.75 {
-            let kb = $x as f64 / 1024.0;
-            format!("{}K", ((kb * 10.0).round() / 10.0).thousands_sep())
-        } else {
-            format!("{}M", ((mb * 10.0).round() / 10.0).thousands_sep())
-        }
-    }};
+fn megabytes(bytes: usize) -> String {
+    let mb = bytes as f64 / 1024.0 / 1024.0;
+    if mb > 2048.0 {
+        format!(
+            "{}G",
+            (((mb / 1024.0) * 100.0).round() / 100.0).thousands_sep()
+        )
+    } else if mb < 0.75 {
+        let kb = bytes as f64 / 1024.0;
+        format!("{}K", ((kb * 10.0).round() / 10.0).thousands_sep())
+    } else {
+        format!("{}M", ((mb * 10.0).round() / 10.0).thousands_sep())
+    }
 }
 
 async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyhow::Result<()> {
@@ -247,10 +245,10 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
                         e
                     })?;
                 info!(
-                    filesize = megabytes!(body.len()),
-                    crate_name = %vers.name,
+                    crate = %vers.name,
                     version = %vers.vers,
-                    "downloaded .crate file in {:?}", req_begin.elapsed(),
+                    size = %megabytes(body.len()),
+                    elapsed = ?req_begin.elapsed(),
                 );
                 Ok(Some(output_path))
             }
