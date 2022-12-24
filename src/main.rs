@@ -6,10 +6,11 @@ use semver::Version;
 use serde::Deserialize;
 use std::fmt::{self, Display};
 use std::io::ErrorKind;
-use std::num::NonZeroU32;
+use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncBufReadExt;
 use tracing::{error, info, warn};
@@ -115,7 +116,7 @@ async fn get_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>
                 Ok(out)
             }
         }))
-        .buffer_unordered(num_cpus::get())
+        .buffer_unordered(thread::available_parallelism().map_or(1, NonZeroUsize::get))
         .collect()
         .await;
 
