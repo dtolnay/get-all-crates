@@ -63,18 +63,12 @@ fn is_hidden(entry: &DirEntry) -> bool {
 }
 
 fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
-    let file = File::open(path).map_err(|e| {
-        error!(err = ?e, ?path, "failed to open file");
-        e
-    })?;
+    let file = File::open(path)?;
     let buf = BufReader::new(file);
     let mut out = Vec::new();
     for line in buf.lines() {
         let line = line?;
-        let vers: CrateVersion = serde_json::from_str(&line).map_err(|e| {
-            error!(?path, "{},", e);
-            e
-        })?;
+        let vers: CrateVersion = serde_json::from_str(&line)?;
         out.push(vers);
     }
     Ok(out)
@@ -109,7 +103,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
                 let path = entry.into_path();
                 match get_crate_versions(&path) {
                     Ok(vec) => crate_versions.lock().extend(vec),
-                    Err(err) => error!(?err, "parsing metadata failed, skipping file"),
+                    Err(err) => error!(?path, "{},", err),
                 }
             });
         }
