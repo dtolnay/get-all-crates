@@ -1,3 +1,4 @@
+use anyhow::bail;
 use clap::Parser;
 use futures::stream::StreamExt;
 use governor::state::direct::StreamRateLimitExt;
@@ -14,8 +15,6 @@ use std::time::Instant;
 use tokio::io::AsyncBufReadExt;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::filter::EnvFilter;
-
-type AnyError = Box<dyn std::error::Error>;
 
 /// One version per line in the index metadata files.
 #[derive(Debug, Clone, Deserialize)]
@@ -133,7 +132,7 @@ impl Config {
         !self.output.overwrite_existing
     }
 
-    pub fn compile_filter(&self) -> Result<Option<regex::Regex>, AnyError> {
+    pub fn compile_filter(&self) -> anyhow::Result<Option<regex::Regex>> {
         match self.filter_crates.as_ref() {
             Some(regex) => {
                 let compiled = regex::Regex::new(regex).map_err(|e| {
@@ -184,7 +183,7 @@ impl std::fmt::Debug for HttpConfig {
     }
 }
 
-async fn popen(cmd: &str, args: &[&str], envs: &[(&str, &str)]) -> Result<Output, AnyError> {
+async fn popen(cmd: &str, args: &[&str], envs: &[(&str, &str)]) -> anyhow::Result<Output> {
     let args: Vec<String> = args.iter().map(|x| x.to_string()).collect();
 
     let output = tokio::process::Command::new(cmd)
@@ -218,17 +217,16 @@ async fn popen(cmd: &str, args: &[&str], envs: &[(&str, &str)]) -> Result<Output
             from_utf8(&output.stderr)?,
         );
 
-        return Err(format!(
+        bail!(
             "git clone commnad failed with error code {:?}",
-            output.status
-        )
-        .into());
+            output.status,
+        );
     }
 
     Ok(output)
 }
 
-async fn git_clone(src: &str, dst: &Path, envs: &[(&str, &str)]) -> Result<(), AnyError> {
+async fn git_clone(src: &str, dst: &Path, envs: &[(&str, &str)]) -> anyhow::Result<()> {
     let begin = Instant::now();
     popen(
         "git",
@@ -240,7 +238,7 @@ async fn git_clone(src: &str, dst: &Path, envs: &[(&str, &str)]) -> Result<(), A
         envs,
     )
     .await
-    .map_err(|e| -> AnyError {
+    .map_err(|e| -> anyhow::Error {
         error!(%src, ?dst, ?e, "in git_clone, Command failed");
         e
     })?;
@@ -269,7 +267,7 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
 async fn get_crate_versions(
     config: &Config,
     clone_dir: &Path,
-) -> Result<Vec<CrateVersion>, AnyError> {
+) -> anyhow::Result<Vec<CrateVersion>> {
     let filter = config.compile_filter()?;
     let mut n_excl = 0;
     let n_existing = Arc::new(AtomicUsize::new(0));
@@ -316,7 +314,7 @@ async fn get_crate_versions(
         );
     }
 
-    let crate_versions: Vec<Result<Vec<CrateVersion>, AnyError>> =
+    let crate_versions: Vec<anyhow::Result<Vec<CrateVersion>>> =
         futures::stream::iter(files.into_iter().map(|path| {
             let n_existing = n_existing.clone();
             async move {
@@ -387,13 +385,13 @@ async fn get_crate_versions(
     Ok(crate_versions)
 }
 
-async fn ensure_dir_exists<P: AsRef<std::path::Path>>(path: P) -> Result<(), AnyError> {
+async fn ensure_dir_exists<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<()> {
     match tokio::fs::metadata(path.as_ref()).await {
         Ok(meta) if meta.is_dir() => Ok(()),
 
         Ok(meta) /* if ! meta.is_dir() */ => {
             debug_assert!( ! meta.is_dir());
-            Err(format!("path exists, but is not a directory: {:?}", path.as_ref()).into())
+            bail!("path exists, but is not a directory: {:?}", path.as_ref());
         }
 
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
@@ -405,7 +403,7 @@ async fn ensure_dir_exists<P: AsRef<std::path::Path>>(path: P) -> Result<(), Any
     }
 }
 
-async fn ensure_file_parent_dir_exists<P: AsRef<std::path::Path>>(path: P) -> Result<(), AnyError> {
+async fn ensure_file_parent_dir_exists<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<()> {
     if let Some(parent_dir) = path.as_ref().parent() {
         ensure_dir_exists(parent_dir).await
     } else {
@@ -431,7 +429,7 @@ macro_rules! megabytes {
     }};
 }
 
-async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> Result<(), AnyError> {
+async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyhow::Result<()> {
     let begin = Instant::now();
     ensure_dir_exists(&config.output.path).await?;
 
@@ -493,7 +491,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> Resu
             if !status.is_success() {
                 error!(status = ?status, "download failed");
                 debug!("response body:\n{}\n", from_utf8(&body.slice(..))?);
-                Err::<_, AnyError>(format!("error response {:?} from server", status).into())
+                bail!("error response {:?} from server", status);
             } else {
                 // TODO: check if this path exists already before downloading
                 ensure_file_parent_dir_exists(&output_path)
@@ -522,7 +520,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> Resu
 
     let outer_stream = inner_stream.ratelimit_stream(&rate_limit);
 
-    let results: Vec<Result<Option<PathBuf>, AnyError>> = outer_stream.collect().await;
+    let results: Vec<anyhow::Result<Option<PathBuf>>> = outer_stream.collect().await;
 
     let mut ret = Ok(());
 
@@ -556,7 +554,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> Resu
     ret
 }
 
-async fn run(config: Config) -> Result<(), AnyError> {
+async fn run(config: Config) -> anyhow::Result<()> {
     debug!("config:\n{:#?}\n", config);
 
     assert!(
