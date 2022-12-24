@@ -29,18 +29,6 @@ pub struct OutputConfig {
     /// Directory where downloaded .crate files will be saved to.
     #[clap(short = 'o', long = "output-path")]
     pub path: PathBuf,
-    /// What format to use for the output filenames. Works the same as
-    /// Cargo's registry syntax for the "dl" key in the `config.json`
-    /// file in a reigstry index. See [Cargo
-    /// docs](https://doc.rust-lang.org/cargo/reference/registries.html#index-format)
-    /// for additional details. Not specifying this field is equivalent
-    /// to specifying "{crate}/{version}/download", the default.
-    ///
-    /// The resulting path specified by the format should be relative;
-    /// it will be joined with the --output-path. (i.e. it should not start
-    /// with "/".)
-    #[clap(long = "output-format")]
-    pub format: Option<String>,
 }
 
 #[derive(Parser, Debug)]
