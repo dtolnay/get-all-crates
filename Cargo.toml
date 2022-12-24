@@ -1,0 +1,45 @@
+[package]
+name = "registry-backup"
+authors = ["Jonathan Strong <jstrong@shipyard.rs>"]
+version = "0.4.1"
+edition = "2021"
+publish = ["shipyard-rs-public"]
+readme = "README.md"
+repository = "https://git.shipyard.rs/jstrong/registry-backup"
+homepage = "https://git.shipyard.rs/jstrong/registry-backup"
+documentation = "https://git.shipyard.rs/jstrong/registry-backup"
+license-file = "LICENSE"
+description = "CLI tool for backup/export of .crate files from a registry server"
+
+[[bin]]
+name = "registry-backup"
+path = "src/main.rs"
+
+[[bin]]
+name = "generate-readme"
+path = "src/generate-readme.rs"
+required-features = ["docs"]
+
+[dependencies]
+clap = { version = "3.1", default-features = false, features = ["std", "derive", "cargo", "color"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1.0.69"
+toml = "0.5.9"
+tempdir = "0.3.7"
+tracing = "0.1.29"
+tracing-subscriber = { version = "0.2.18", features = ["env-filter", "registry"] }
+tokio = { version = "1.21", features = ["full"] }
+reqwest = { version = "0.11", default-features = false, features = ["json", "stream", "rustls-tls", "cookies", "multipart", "gzip", "brotli", "deflate", "trust-dns"] }
+futures = "0.3.7"
+walkdir = "2.3"
+num_cpus = "1.3"
+governor = "0.4.2"
+pretty_toa = "1"
+tera = { version = "1", optional = true }
+chrono = { version = "0.4", optional = true }
+regex = "1.6"
+url = "2"
+
+[features]
+default = []
+docs = ["tera", "chrono"]
