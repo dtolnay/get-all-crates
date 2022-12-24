@@ -2,16 +2,18 @@ use anyhow::bail;
 use clap::Parser;
 use futures::stream::StreamExt;
 use pretty_toa::ThousandsSep;
+use rayon::ThreadPoolBuilder;
 use semver::Version;
 use serde::Deserialize;
 use std::fmt::{self, Display};
-use std::io::ErrorKind;
+use std::fs::File;
+use std::io::{BufRead, BufReader, ErrorKind};
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
-use tokio::io::AsyncBufReadExt;
 use tracing::{error, info, warn};
 use tracing_subscriber::filter::EnvFilter;
 use url::Url;
@@ -61,19 +63,19 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
         .unwrap_or(false)
 }
 
-async fn get_crate_versions(
+fn get_crate_versions(
     config: &Config,
     path: PathBuf,
     n_existing: &AtomicUsize,
 ) -> anyhow::Result<Vec<CrateVersion>> {
-    let file = tokio::fs::File::open(&path).await.map_err(|e| {
+    let file = File::open(&path).map_err(|e| {
         error!(err = ?e, ?path, "failed to open file");
         e
     })?;
-    let buf = tokio::io::BufReader::new(file);
+    let buf = BufReader::new(file);
     let mut out = Vec::new();
-    let mut lines = buf.lines();
-    'lines: while let Some(line) = lines.next_line().await? {
+    for line in buf.lines() {
+        let line = line?;
         let vers: CrateVersion = serde_json::from_str(&line).map_err(|e| {
             error!(?path, "{},", e);
             e
@@ -83,7 +85,7 @@ async fn get_crate_versions(
         let output_path = config.output_path.join(vers_path);
         if output_path.exists() {
             n_existing.fetch_add(1, Ordering::Relaxed);
-            continue 'lines;
+            continue;
         }
 
         out.push(vers);
@@ -91,7 +93,7 @@ async fn get_crate_versions(
     Ok(out)
 }
 
-async fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
+fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
     let files: Vec<PathBuf> = WalkDir::new(&config.index_path)
         .max_depth(3)
         .into_iter()
@@ -114,17 +116,29 @@ async fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVers
     let n_files = files.len();
     info!("found {} crate metadata files to parse", n_files);
 
+    let num_threads = thread::available_parallelism().map_or(1, NonZeroUsize::get);
+    let thread_pool = ThreadPoolBuilder::new().num_threads(num_threads).build()?;
+
     let n_existing = AtomicUsize::new(0);
-    let crate_versions: Vec<anyhow::Result<Vec<CrateVersion>>> = futures::stream::iter(
-        files
-            .into_iter()
-            .map(|path| get_crate_versions(config, path, &n_existing)),
-    )
-    .buffer_unordered(thread::available_parallelism().map_or(1, NonZeroUsize::get))
-    .collect()
-    .await;
+    let crate_versions = Mutex::new(Vec::new());
+    thread_pool.in_place_scope(|scope| {
+        for path in files {
+            scope.spawn(
+                |_scope| match get_crate_versions(config, path, &n_existing) {
+                    Ok(vec) => crate_versions
+                        .lock()
+                        .unwrap_or_else(PoisonError::into_inner)
+                        .extend(vec),
+                    Err(err) => error!(?err, "parsing metadata failed, skipping file"),
+                },
+            );
+        }
+    });
 
     let n_existing = n_existing.load(Ordering::Relaxed);
+    let crate_versions = crate_versions
+        .into_inner()
+        .unwrap_or_else(PoisonError::into_inner);
 
     if n_existing > 0 {
         warn!(
@@ -132,16 +146,6 @@ async fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVers
             n_existing,
         );
     }
-
-    let crate_versions: Vec<CrateVersion> = crate_versions
-        .into_iter()
-        .flat_map(|result| {
-            result.unwrap_or_else(|e| {
-                error!(err = ?e, "parsing metadata failed, skipping file");
-                Vec::new()
-            })
-        })
-        .collect();
 
     info!(
         n_files,
@@ -318,13 +322,13 @@ fn main() -> anyhow::Result<()> {
     info!("initializing...");
 
     let config = Config::parse();
+    let versions = get_all_crate_versions(&config)?;
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
         .build()?;
 
     rt.block_on(async {
-        let versions = get_all_crate_versions(&config).await?;
         if false {
             download_versions(&config, versions).await?;
         }
