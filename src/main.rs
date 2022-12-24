@@ -81,34 +81,31 @@ fn get_crate_versions(path: PathBuf) -> anyhow::Result<Vec<CrateVersion>> {
 }
 
 fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
-    let files: Vec<PathBuf> = WalkDir::new(&config.index_path)
-        .max_depth(3)
-        .into_iter()
-        .filter_entry(|e| !is_hidden(e))
-        .filter_map(|res| match res {
-            Ok(entry) => {
-                if entry.file_type().is_file() && entry.depth() >= 2 && entry.depth() <= 3 {
-                    Some(entry.into_path())
-                } else {
-                    None
-                }
-            }
-            Err(e) => {
-                warn!(error = ?e, "walkdir result is error");
-                None
-            }
-        })
-        .collect();
-
-    let n_files = files.len();
-    info!("found {} crate metadata files to parse", n_files);
-
     let num_threads = thread::available_parallelism().map_or(1, NonZeroUsize::get);
     let thread_pool = ThreadPoolBuilder::new().num_threads(num_threads).build()?;
 
     let crate_versions = Mutex::new(Vec::new());
+    let mut n_files = 0;
     thread_pool.in_place_scope(|scope| {
-        for path in files {
+        for path in WalkDir::new(&config.index_path)
+            .max_depth(3)
+            .into_iter()
+            .filter_entry(|e| !is_hidden(e))
+            .filter_map(|res| match res {
+                Ok(entry) => {
+                    if entry.file_type().is_file() && entry.depth() >= 2 && entry.depth() <= 3 {
+                        Some(entry.into_path())
+                    } else {
+                        None
+                    }
+                }
+                Err(e) => {
+                    warn!(error = ?e, "walkdir result is error");
+                    None
+                }
+            })
+        {
+            n_files += 1;
             scope.spawn(|_scope| match get_crate_versions(path) {
                 Ok(vec) => crate_versions.lock().extend(vec),
                 Err(err) => error!(?err, "parsing metadata failed, skipping file"),
