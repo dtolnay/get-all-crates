@@ -22,8 +22,9 @@ const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VER
 struct CrateVersion {
     name: String,
     vers: String,
+    #[serde(with = "hex")]
     #[allow(dead_code)]
-    cksum: String,
+    cksum: [u8; 32],
 }
 
 /// Download all .crate files from a registry server.
