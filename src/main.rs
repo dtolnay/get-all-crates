@@ -1,8 +1,6 @@
 use anyhow::bail;
 use clap::Parser;
 use futures::stream::StreamExt;
-use governor::state::direct::StreamRateLimitExt;
-use governor::{Quota, RateLimiter};
 use serde::Deserialize;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -54,10 +52,6 @@ pub struct HttpConfig {
     /// Value of user-agent HTTP header
     #[clap(short = 'U', long, default_value = DEFAULT_USER_AGENT)]
     pub user_agent: String,
-    /// Requests to registry server will not exceed this rate
-    #[clap(short = 'R', long, default_value_t = default_requests_per_second())]
-    #[clap(value_name = "INT")]
-    pub requests_per_second: NonZeroU32,
     /// Independent of the requests per second rate limit, no more
     /// than `max_concurrent_requests` will be in flight at any given
     /// moment.
@@ -107,10 +101,6 @@ pub struct Config {
 
 const DEFAULT_USER_AGENT: &str = concat!("registry-backup/v", clap::crate_version!());
 
-const fn default_requests_per_second() -> NonZeroU32 {
-    unsafe { NonZeroU32::new_unchecked(100) }
-}
-
 const fn default_max_concurrent_requests() -> NonZeroU32 {
     unsafe { NonZeroU32::new_unchecked(50) }
 }
@@ -138,7 +128,6 @@ impl Default for HttpConfig {
     fn default() -> Self {
         Self {
             user_agent: DEFAULT_USER_AGENT.to_owned(),
-            requests_per_second: default_requests_per_second(),
             max_concurrent_requests: default_max_concurrent_requests(),
         }
     }
@@ -155,7 +144,6 @@ impl std::fmt::Debug for HttpConfig {
                     &self.user_agent
                 },
             )
-            .field("requests_per_second", &self.requests_per_second)
             .field("max_concurrent_requests", &self.max_concurrent_requests)
             .finish()
     }
@@ -411,20 +399,16 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
     let begin = Instant::now();
     ensure_dir_exists(&config.output.path).await?;
 
-    let rate_limit = RateLimiter::direct(Quota::per_second(config.http.requests_per_second));
-
     let http_client = reqwest::Client::builder()
         .user_agent(&config.http.user_agent)
         .build()?;
 
     info!(
-        reqs_per_sec = config.http.requests_per_second,
         max_concurrency = config.http.max_concurrent_requests,
-        "downloading crates at {} reqs/sec",
-        config.http.requests_per_second,
+        "downloading crates",
     );
 
-    let inner_stream = futures::stream::iter(versions.into_iter().map(|vers| {
+    let stream = futures::stream::iter(versions.into_iter().map(|vers| {
         let req_begin = Instant::now();
         let http_client = http_client.clone();
 
@@ -489,9 +473,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
     }))
     .buffer_unordered(config.http.max_concurrent_requests.get() as usize);
 
-    let outer_stream = inner_stream.ratelimit_stream(&rate_limit);
-
-    let results: Vec<anyhow::Result<Option<PathBuf>>> = outer_stream.collect().await;
+    let results: Vec<anyhow::Result<Option<PathBuf>>> = stream.collect().await;
 
     let mut ret = Ok(());
 
