@@ -1,15 +1,12 @@
 [package]
-name = "registry-backup"
-authors = ["Jonathan Strong <jstrong@shipyard.rs>"]
-version = "0.4.1"
+name = "get-all-crates"
+authors = ["David Tolnay <dtolnay@gmail.com>"]
+version = "0.0.0"
 edition = "2021"
-publish = ["shipyard-rs-public"]
 readme = "README.md"
-repository = "https://git.shipyard.rs/jstrong/registry-backup"
-homepage = "https://git.shipyard.rs/jstrong/registry-backup"
-documentation = "https://git.shipyard.rs/jstrong/registry-backup"
-license-file = "LICENSE"
-description = "CLI tool for backup/export of .crate files from a registry server"
+repository = "https://github.com/dtolnay/get-all-crates"
+license = "MIT"
+description = "Download .crate files of all version of all crates from crates.io"
 
 [dependencies]
 clap = { version = "3.1", default-features = false, features = ["std", "derive", "cargo", "color"] }
