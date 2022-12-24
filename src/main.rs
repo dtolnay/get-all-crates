@@ -12,6 +12,8 @@ use tokio::io::AsyncBufReadExt;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::filter::EnvFilter;
 
+const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
+
 /// One version per line in the index metadata files.
 #[derive(Debug, Clone, Deserialize)]
 pub struct CrateVersion {
@@ -41,11 +43,8 @@ pub struct OutputConfig {
     pub format: Option<String>,
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 pub struct HttpConfig {
-    /// Value of user-agent HTTP header
-    #[clap(short = 'U', long, default_value = DEFAULT_USER_AGENT)]
-    pub user_agent: String,
     /// Independent of the requests per second rate limit, no more
     /// than `max_concurrent_requests` will be in flight at any given
     /// moment.
@@ -87,8 +86,6 @@ pub struct Config {
     pub dry_run: bool,
 }
 
-const DEFAULT_USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
-
 const fn default_max_concurrent_requests() -> NonZeroU32 {
     unsafe { NonZeroU32::new_unchecked(50) }
 }
@@ -111,25 +108,8 @@ impl Config {
 impl Default for HttpConfig {
     fn default() -> Self {
         Self {
-            user_agent: DEFAULT_USER_AGENT.to_owned(),
             max_concurrent_requests: default_max_concurrent_requests(),
         }
-    }
-}
-
-impl std::fmt::Debug for HttpConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_struct("Config")
-            .field(
-                "user_agent",
-                if self.user_agent.starts_with("shipyard ") {
-                    &"shipyard ***"
-                } else {
-                    &self.user_agent
-                },
-            )
-            .field("max_concurrent_requests", &self.max_concurrent_requests)
-            .finish()
     }
 }
 
@@ -316,9 +296,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
     let begin = Instant::now();
     ensure_dir_exists(&config.output.path).await?;
 
-    let http_client = reqwest::Client::builder()
-        .user_agent(&config.http.user_agent)
-        .build()?;
+    let http_client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
     info!(
         max_concurrency = config.http.max_concurrent_requests,
