@@ -7,8 +7,8 @@ use rayon::ThreadPoolBuilder;
 use semver::Version;
 use serde::Deserialize;
 use std::fmt::{self, Display};
-use std::fs::File;
-use std::io::{BufRead, BufReader, ErrorKind};
+use std::fs;
+use std::io::ErrorKind;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -63,15 +63,11 @@ fn is_hidden(entry: &DirEntry) -> bool {
 }
 
 fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
-    let file = File::open(path)?;
-    let buf = BufReader::new(file);
-    let mut out = Vec::new();
-    for line in buf.lines() {
-        let line = line?;
-        let vers: CrateVersion = serde_json::from_str(&line)?;
-        out.push(vers);
-    }
-    Ok(out)
+    let content = fs::read(path)?;
+    serde_json::Deserializer::from_slice(&content)
+        .into_iter::<CrateVersion>()
+        .collect::<serde_json::Result<_>>()
+        .map_err(anyhow::Error::new)
 }
 
 fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
