@@ -4,7 +4,6 @@ use futures::stream::StreamExt;
 use serde::Deserialize;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
-use std::process::Output;
 use std::str::from_utf8;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::Arc;
@@ -62,16 +61,10 @@ pub struct HttpConfig {
 
 #[derive(Parser, Debug)]
 pub struct TargetRegistryConfig {
-    /// URL of the registry index we are downloading .crate files from. The
-    /// program expects that it will be able to clone the index to a local
-    /// temporary directory; the user must handle authentication if needed.
-    #[clap(long, value_name = "URL")]
-    pub index_url: Option<String>,
     /// instead of an index url, just point to a local path where the index
     /// is already cloned.
-    #[clap(long, conflicts_with = "index-url")]
-    #[clap(value_name = "PATH")]
-    pub index_path: Option<PathBuf>,
+    #[clap(long, value_name = "PATH")]
+    pub index_path: PathBuf,
 }
 
 /// Download all .crate files from a registry server.
@@ -147,71 +140,6 @@ impl std::fmt::Debug for HttpConfig {
             .field("max_concurrent_requests", &self.max_concurrent_requests)
             .finish()
     }
-}
-
-async fn popen(cmd: &str, args: &[&str], envs: &[(&str, &str)]) -> anyhow::Result<Output> {
-    let args: Vec<String> = args.iter().map(|x| x.to_string()).collect();
-
-    let output = tokio::process::Command::new(cmd)
-        .args(args.iter().map(|x| x.as_str()))
-        .envs(envs.iter().map(|(k, v)| (k.to_string(), v.to_string())))
-        .output()
-        .await
-        .map_err(|e| {
-            error!("Command `{}` failed to execute at all: {:?}", cmd, e);
-            e
-        })?;
-
-    debug!(
-        "finished executing `{}` Command with status {:?}\n STDOUT (length={}):\n{}\n STDERR (length={}):\n{}\n",
-        cmd,
-        output.status,
-        output.stdout.len(),
-        from_utf8(&output.stdout)?,
-        output.stderr.len(),
-        from_utf8(&output.stderr)?,
-    );
-
-    if !output.status.success() {
-        error!(
-            "finished executing `{}` Command with status {:?}\n STDOUT (length={}):\n{}\n STDERR (length={}):\n{}\n",
-            cmd,
-            output.status,
-            output.stdout.len(),
-            from_utf8(&output.stdout)?,
-            output.stderr.len(),
-            from_utf8(&output.stderr)?,
-        );
-
-        bail!(
-            "git clone commnad failed with error code {:?}",
-            output.status,
-        );
-    }
-
-    Ok(output)
-}
-
-async fn git_clone(src: &str, dst: &Path, envs: &[(&str, &str)]) -> anyhow::Result<()> {
-    let begin = Instant::now();
-    popen(
-        "git",
-        &[
-            "clone",
-            src,
-            dst.to_str().expect("dst path .to_str() failed"),
-        ][..],
-        envs,
-    )
-    .await
-    .map_err(|e| -> anyhow::Error {
-        error!(%src, ?dst, ?e, "in git_clone, Command failed");
-        e
-    })?;
-
-    info!(%src, ?dst, "cloned repo in {:?}", begin.elapsed());
-
-    Ok(())
 }
 
 fn setup_logger() {
@@ -510,28 +438,10 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
 async fn run(config: Config) -> anyhow::Result<()> {
     debug!("config:\n{:#?}\n", config);
 
-    assert!(
-        config.registry.index_url.is_some() || config.registry.index_path.is_some(),
-        "one of index-url or index-path is required",
-    );
-
     // verify regex compiles
     let _ = config.compile_filter()?;
 
-    let tmpdir = tempdir::TempDir::new("registry-backup-index")?;
-
-    let index_path = match (&config.registry.index_url, &config.registry.index_path) {
-        (Some(url), _) => {
-            let tmp = tmpdir.path();
-            git_clone(url, tmp, &[][..]).await?;
-            tmp
-        }
-
-        (_, Some(path)) => path,
-
-        _ => unreachable!(),
-    };
-
+    let index_path = &config.registry.index_path;
     let versions = get_crate_versions(&config, index_path).await?;
 
     download_versions(&config, versions).await?;
