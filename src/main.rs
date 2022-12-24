@@ -22,46 +22,25 @@ pub struct CrateVersion {
     pub cksum: String,
 }
 
-/// Configuration for where to save the downloaded .crate files, and
-/// using what syntax for the output filenames.
-#[derive(Debug, Parser)]
-pub struct OutputConfig {
-    /// Directory where downloaded .crate files will be saved to.
-    #[clap(short = 'o', long = "output-path")]
-    pub path: PathBuf,
-}
-
+/// Download all .crate files from a registry server.
 #[derive(Parser, Debug)]
-pub struct HttpConfig {
+#[clap(author, version, global_setting(clap::AppSettings::DeriveDisplayOrder))]
+pub struct Config {
+    /// instead of an index url, just point to a local path where the index
+    /// is already cloned.
+    #[clap(long, value_name = "PATH")]
+    pub index_path: PathBuf,
+
+    /// Directory where downloaded .crate files will be saved to.
+    #[clap(short = 'o')]
+    pub output_path: PathBuf,
+
     /// Independent of the requests per second rate limit, no more
     /// than `max_concurrent_requests` will be in flight at any given
     /// moment.
     #[clap(short = 'M', long, default_value_t = default_max_concurrent_requests())]
     #[clap(value_name = "INT")]
     pub max_concurrent_requests: NonZeroU32,
-}
-
-#[derive(Parser, Debug)]
-pub struct TargetRegistryConfig {
-    /// instead of an index url, just point to a local path where the index
-    /// is already cloned.
-    #[clap(long, value_name = "PATH")]
-    pub index_path: PathBuf,
-}
-
-/// Download all .crate files from a registry server.
-#[derive(Parser, Debug)]
-#[clap(author, version, global_setting(clap::AppSettings::DeriveDisplayOrder))]
-pub struct Config {
-    /// Crate registry location and authentication
-    #[clap(flatten)]
-    pub registry: TargetRegistryConfig,
-    /// Where to save the downloaded files
-    #[clap(flatten)]
-    pub output: OutputConfig,
-    /// Download settings
-    #[clap(flatten)]
-    pub http: HttpConfig,
 
     /// Only crates with names that match --filter-crate regex will be downloaded
     #[clap(long, value_name = "REGEX")]
@@ -89,14 +68,6 @@ impl Config {
                 Ok(Some(compiled))
             }
             None => Ok(None),
-        }
-    }
-}
-
-impl Default for HttpConfig {
-    fn default() -> Self {
-        Self {
-            max_concurrent_requests: default_max_concurrent_requests(),
         }
     }
 }
@@ -185,7 +156,7 @@ async fn get_crate_versions(
                     })?;
 
                     let vers_path = format!("{}/{}/download", vers.name, vers.vers);
-                    let output_path = config.output.path.join(vers_path);
+                    let output_path = config.output_path.join(vers_path);
                     if output_path.exists() {
                         n_existing.fetch_add(1, Ordering::Relaxed);
                         continue 'lines;
@@ -282,12 +253,12 @@ macro_rules! megabytes {
 
 async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyhow::Result<()> {
     let begin = Instant::now();
-    ensure_dir_exists(&config.output.path).await?;
+    ensure_dir_exists(&config.output_path).await?;
 
     let http_client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
     info!(
-        max_concurrency = config.http.max_concurrent_requests,
+        max_concurrency = config.max_concurrent_requests,
         "downloading crates",
     );
 
@@ -304,8 +275,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
 
             let name_lower = vers.name.to_ascii_lowercase();
             let output_path = config
-                .output
-                .path
+                .output_path
                 .join(PathBuf::from_iter(match name_lower.len() {
                     1 => vec!["1"],
                     2 => vec!["2"],
@@ -354,7 +324,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
             }
         }
     }))
-    .buffer_unordered(config.http.max_concurrent_requests.get() as usize);
+    .buffer_unordered(config.max_concurrent_requests.get() as usize);
 
     let results: Vec<anyhow::Result<Option<PathBuf>>> = stream.collect().await;
 
@@ -396,7 +366,7 @@ async fn run(config: Config) -> anyhow::Result<()> {
     // verify regex compiles
     let _ = config.compile_filter()?;
 
-    let index_path = &config.registry.index_path;
+    let index_path = &config.index_path;
     let versions = get_crate_versions(&config, index_path).await?;
 
     download_versions(&config, versions).await?;
