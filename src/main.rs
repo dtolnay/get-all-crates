@@ -9,7 +9,6 @@ use std::io::ErrorKind;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use tokio::io::AsyncBufReadExt;
@@ -63,8 +62,6 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
 }
 
 async fn get_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
-    let n_existing = Arc::new(AtomicUsize::new(0));
-
     let files: Vec<PathBuf> = WalkDir::new(&config.index_path)
         .max_depth(3)
         .into_iter()
@@ -87,9 +84,10 @@ async fn get_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>
     let n_files = files.len();
     info!("found {} crate metadata files to parse", n_files);
 
+    let n_existing = AtomicUsize::new(0);
     let crate_versions: Vec<anyhow::Result<Vec<CrateVersion>>> =
         futures::stream::iter(files.into_iter().map(|path| {
-            let n_existing = n_existing.clone();
+            let n_existing = &n_existing;
             async move {
                 let file = tokio::fs::File::open(&path).await.map_err(|e| {
                     error!(err = ?e, ?path, "failed to open file");
