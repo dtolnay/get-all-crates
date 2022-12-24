@@ -1,7 +1,9 @@
 use anyhow::bail;
-use clap::Parser;
+use clap::{AppSettings, Parser};
 use futures::stream::StreamExt;
+use pretty_toa::ThousandsSep;
 use serde::Deserialize;
+use std::io::ErrorKind;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
 use std::str::from_utf8;
@@ -11,6 +13,8 @@ use std::time::Instant;
 use tokio::io::AsyncBufReadExt;
 use tracing::{debug, error, info, warn};
 use tracing_subscriber::filter::EnvFilter;
+use url::Url;
+use walkdir::WalkDir;
 
 const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
 
@@ -24,7 +28,7 @@ pub struct CrateVersion {
 
 /// Download all .crate files from a registry server.
 #[derive(Parser, Debug)]
-#[clap(author, version, global_setting(clap::AppSettings::DeriveDisplayOrder))]
+#[clap(author, version, global_setting(AppSettings::DeriveDisplayOrder))]
 pub struct Config {
     /// Local path where the crates.io-index is already cloned
     #[clap(long = "index", value_name = "PATH")]
@@ -61,7 +65,7 @@ async fn get_crate_versions(
 ) -> anyhow::Result<Vec<CrateVersion>> {
     let n_existing = Arc::new(AtomicUsize::new(0));
 
-    let files: Vec<PathBuf> = walkdir::WalkDir::new(clone_dir)
+    let files: Vec<PathBuf> = WalkDir::new(clone_dir)
         .max_depth(3)
         .into_iter()
         .filter_entry(|e| !is_hidden(e))
@@ -153,7 +157,7 @@ async fn get_crate_versions(
     Ok(crate_versions)
 }
 
-async fn ensure_dir_exists<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<()> {
+async fn ensure_dir_exists<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
     match tokio::fs::metadata(path.as_ref()).await {
         Ok(meta) if meta.is_dir() => Ok(()),
 
@@ -162,7 +166,7 @@ async fn ensure_dir_exists<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result
             bail!("path exists, but is not a directory: {:?}", path.as_ref());
         }
 
-        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {
+        Err(e) if e.kind() == ErrorKind::NotFound => {
             tokio::fs::create_dir_all(&path).await?;
             Ok(())
         }
@@ -171,7 +175,7 @@ async fn ensure_dir_exists<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result
     }
 }
 
-async fn ensure_file_parent_dir_exists<P: AsRef<std::path::Path>>(path: P) -> anyhow::Result<()> {
+async fn ensure_file_parent_dir_exists<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
     if let Some(parent_dir) = path.as_ref().parent() {
         ensure_dir_exists(parent_dir).await
     } else {
@@ -181,7 +185,6 @@ async fn ensure_file_parent_dir_exists<P: AsRef<std::path::Path>>(path: P) -> an
 
 macro_rules! megabytes {
     ($x:expr) => {{
-        use pretty_toa::ThousandsSep;
         let mb = $x as f64 / 1024.0 / 1024.0;
         if mb > 2048.0 {
             format!(
@@ -213,7 +216,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
         let http_client = http_client.clone();
 
         async move {
-            let url = url::Url::parse(&format!(
+            let url = Url::parse(&format!(
                 "https://static.crates.io/crates/{name}/{name}-{version}.crate",
                 name = vers.name,
                 version = vers.vers,
