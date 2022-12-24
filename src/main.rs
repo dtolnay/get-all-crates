@@ -157,13 +157,13 @@ async fn get_crate_versions(
     Ok(crate_versions)
 }
 
-async fn ensure_dir_exists<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
-    match tokio::fs::metadata(path.as_ref()).await {
+async fn ensure_dir_exists(path: &Path) -> anyhow::Result<()> {
+    match tokio::fs::metadata(path).await {
         Ok(meta) if meta.is_dir() => Ok(()),
 
         Ok(meta) /* if ! meta.is_dir() */ => {
             debug_assert!( ! meta.is_dir());
-            bail!("path exists, but is not a directory: {:?}", path.as_ref());
+            bail!("path exists, but is not a directory: {:?}", path);
         }
 
         Err(e) if e.kind() == ErrorKind::NotFound => {
@@ -175,8 +175,8 @@ async fn ensure_dir_exists<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
     }
 }
 
-async fn ensure_file_parent_dir_exists<P: AsRef<Path>>(path: P) -> anyhow::Result<()> {
-    if let Some(parent_dir) = path.as_ref().parent() {
+async fn ensure_file_parent_dir_exists(path: &Path) -> anyhow::Result<()> {
+    if let Some(parent_dir) = path.parent() {
         ensure_dir_exists(parent_dir).await
     } else {
         Ok(())
