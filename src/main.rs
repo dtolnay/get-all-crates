@@ -16,7 +16,7 @@ use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use tracing_subscriber::filter::EnvFilter;
 use url::Url;
-use walkdir::WalkDir;
+use walkdir::{DirEntry, WalkDir};
 
 const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
 
@@ -54,7 +54,7 @@ fn setup_logger() {
     builder.init();
 }
 
-fn is_hidden(entry: &walkdir::DirEntry) -> bool {
+fn is_hidden(entry: &DirEntry) -> bool {
     entry
         .file_name()
         .to_str()
@@ -62,8 +62,8 @@ fn is_hidden(entry: &walkdir::DirEntry) -> bool {
         .unwrap_or(false)
 }
 
-fn get_crate_versions(path: PathBuf) -> anyhow::Result<Vec<CrateVersion>> {
-    let file = File::open(&path).map_err(|e| {
+fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
+    let file = File::open(path).map_err(|e| {
         error!(err = ?e, ?path, "failed to open file");
         e
     })?;
@@ -87,28 +87,30 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
     let crate_versions = Mutex::new(Vec::new());
     let mut n_files = 0;
     thread_pool.in_place_scope(|scope| {
-        for path in WalkDir::new(&config.index_path)
+        for entry in WalkDir::new(&config.index_path)
             .max_depth(3)
             .into_iter()
             .filter_entry(|e| !is_hidden(e))
-            .filter_map(|res| match res {
-                Ok(entry) => {
-                    if entry.file_type().is_file() && entry.depth() >= 2 && entry.depth() <= 3 {
-                        Some(entry.into_path())
-                    } else {
-                        None
-                    }
-                }
-                Err(e) => {
-                    warn!(error = ?e, "walkdir result is error");
-                    None
-                }
-            })
         {
+            let entry = match entry {
+                Ok(entry) => entry,
+                Err(error) => {
+                    warn!(?error, "walkdir result is error");
+                    continue;
+                }
+            };
+
+            if !(entry.file_type().is_file() && entry.depth() >= 2 && entry.depth() <= 3) {
+                continue;
+            }
+
             n_files += 1;
-            scope.spawn(|_scope| match get_crate_versions(path) {
-                Ok(vec) => crate_versions.lock().extend(vec),
-                Err(err) => error!(?err, "parsing metadata failed, skipping file"),
+            scope.spawn(|_scope| {
+                let path = entry.into_path();
+                match get_crate_versions(&path) {
+                    Ok(vec) => crate_versions.lock().extend(vec),
+                    Err(err) => error!(?err, "parsing metadata failed, skipping file"),
+                }
             });
         }
     });
