@@ -2,6 +2,7 @@ use anyhow::bail;
 use clap::Parser;
 use futures::stream::StreamExt;
 use pretty_toa::ThousandsSep;
+use semver::Version;
 use serde::Deserialize;
 use std::fmt::{self, Display};
 use std::io::ErrorKind;
@@ -21,7 +22,7 @@ const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VER
 #[derive(Deserialize)]
 struct CrateVersion {
     name: String,
-    vers: String,
+    vers: Version,
     #[serde(with = "hex")]
     #[allow(dead_code)]
     cksum: [u8; 32],
