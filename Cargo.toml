@@ -11,15 +11,6 @@ documentation = "https://git.shipyard.rs/jstrong/registry-backup"
 license-file = "LICENSE"
 description = "CLI tool for backup/export of .crate files from a registry server"
 
-[[bin]]
-name = "registry-backup"
-path = "src/main.rs"
-
-[[bin]]
-name = "generate-readme"
-path = "src/generate-readme.rs"
-required-features = ["docs"]
-
 [dependencies]
 clap = { version = "3.1", default-features = false, features = ["std", "derive", "cargo", "color"] }
 serde = { version = "1", features = ["derive"] }
@@ -35,11 +26,5 @@ walkdir = "2.3"
 num_cpus = "1.3"
 governor = "0.4.2"
 pretty_toa = "1"
-tera = { version = "1", optional = true }
-chrono = { version = "0.4", optional = true }
 regex = "1.6"
 url = "2"
-
-[features]
-default = []
-docs = ["tera", "chrono"]
