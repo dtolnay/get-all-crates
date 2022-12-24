@@ -135,12 +135,11 @@ async fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVers
 
     let crate_versions: Vec<CrateVersion> = crate_versions
         .into_iter()
-        .flat_map(|result| match result {
-            Ok(xs) => xs.into_iter().filter(|x| x.name != "vst").collect(),
-            Err(e) => {
+        .flat_map(|result| {
+            result.unwrap_or_else(|e| {
                 error!(err = ?e, "parsing metadata failed, skipping file");
-                vec![]
-            }
+                Vec::new()
+            })
         })
         .collect();
 
