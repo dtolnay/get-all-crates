@@ -3,7 +3,6 @@ use clap::Parser;
 use futures::stream::StreamExt;
 use governor::state::direct::StreamRateLimitExt;
 use governor::{Quota, RateLimiter};
-use reqwest::header::AUTHORIZATION;
 use serde::Deserialize;
 use std::num::NonZeroU32;
 use std::path::{Path, PathBuf};
@@ -67,7 +66,7 @@ pub struct HttpConfig {
     pub max_concurrent_requests: NonZeroU32,
 }
 
-#[derive(Parser)]
+#[derive(Parser, Debug)]
 pub struct TargetRegistryConfig {
     /// URL of the registry index we are downloading .crate files from. The
     /// program expects that it will be able to clone the index to a local
@@ -79,11 +78,6 @@ pub struct TargetRegistryConfig {
     #[clap(long, conflicts_with = "index-url")]
     #[clap(value_name = "PATH")]
     pub index_path: Option<PathBuf>,
-    /// If registry requires authorization (i.e. "auth-required" key is
-    /// set to `true` in the `config.json` file), the token to include
-    /// using the Authorization HTTP header.
-    #[clap(short, long, value_name = "TOKEN")]
-    pub auth_token: Option<String>,
 }
 
 /// Download all .crate files from a registry server.
@@ -137,16 +131,6 @@ impl Config {
             }
             None => Ok(None),
         }
-    }
-}
-
-impl std::fmt::Debug for TargetRegistryConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
-        f.debug_struct("Config")
-            .field("index_url", &self.index_url)
-            .field("index_path", &self.index_path)
-            .field("auth_token", &"***") // hide sensitive data
-            .finish()
     }
 }
 
@@ -471,13 +455,6 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
 
             debug!(?url, "downloading...");
             let req = http_client.get(url);
-
-            let req = if let Some(token) = config.registry.auth_token.as_deref() {
-                req.header(AUTHORIZATION, token)
-            } else {
-                req
-            };
-
             let resp = req.send().await?;
             let status = resp.status();
             let body = resp.bytes().await?;
