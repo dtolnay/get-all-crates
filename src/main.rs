@@ -1,6 +1,7 @@
 use anyhow::bail;
 use clap::Parser;
 use futures::stream::StreamExt;
+use parking_lot::Mutex;
 use pretty_toa::ThousandsSep;
 use rayon::ThreadPoolBuilder;
 use semver::Version;
@@ -11,7 +12,6 @@ use std::io::{BufRead, BufReader, ErrorKind};
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
-use std::sync::{Mutex, PoisonError};
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -125,10 +125,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
         for path in files {
             scope.spawn(
                 |_scope| match get_crate_versions(config, path, &n_existing) {
-                    Ok(vec) => crate_versions
-                        .lock()
-                        .unwrap_or_else(PoisonError::into_inner)
-                        .extend(vec),
+                    Ok(vec) => crate_versions.lock().extend(vec),
                     Err(err) => error!(?err, "parsing metadata failed, skipping file"),
                 },
             );
@@ -136,9 +133,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
     });
 
     let n_existing = n_existing.load(Ordering::Relaxed);
-    let crate_versions = crate_versions
-        .into_inner()
-        .unwrap_or_else(PoisonError::into_inner);
+    let crate_versions = crate_versions.into_inner();
 
     if n_existing > 0 {
         warn!(
