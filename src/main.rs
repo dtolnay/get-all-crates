@@ -175,10 +175,15 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
             n_crates += 1;
             scope.spawn(|_scope| {
                 let path = entry.into_path();
-                match get_crate_versions(&path) {
-                    Ok(vec) => crate_versions.lock().push(vec),
-                    Err(err) => error!(?path, "{},", err),
+                let vers = match get_crate_versions(&path) {
+                    Ok(vers) => vers,
+                    Err(err) => return error!(?path, "{},", err),
+                };
+                let output_dir = dir_for_crate(&config.output_path, &vers.name);
+                if let Err(err) = fs::create_dir_all(&output_dir) {
+                    error!(directory = ?output_dir, %err, "failed to create");
                 }
+                crate_versions.lock().push(vers);
             });
         }
     });
@@ -325,14 +330,8 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
 
     let iter = versions.iter().flat_map(|krate| {
         let dir = dir_for_crate(&config.output_path, &krate.name);
-        let versions = match fs::create_dir_all(&dir) {
-            Ok(()) => &*krate.versions,
-            Err(err) => {
-                error!(directory = ?dir, %err, "failed to create");
-                &[]
-            }
-        };
-        versions
+        krate
+            .versions
             .iter()
             .map(move |vers| download_version(http_client, dir.clone(), &krate.name, vers))
     });
