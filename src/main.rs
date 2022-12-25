@@ -342,9 +342,7 @@ fn main() -> anyhow::Result<()> {
         .build()?;
 
     rt.block_on(async {
-        if false {
-            download_versions(&config, versions).await?;
-        }
+        download_versions(&config, versions).await?;
         info!("finished in {:?}", millis(begin.elapsed()));
         Ok(())
     })
