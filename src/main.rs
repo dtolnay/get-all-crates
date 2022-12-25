@@ -275,27 +275,26 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
                 if !status.is_success() {
                     error!(status = ?status, "download failed");
                     bail!("error response {:?} from server", status);
-                } else {
-                    // TODO: check if this path exists already before downloading
-                    ensure_file_parent_dir_exists(&output_path)
-                        .await
-                        .map_err(|e| {
-                            error!(?output_path, err = ?e, "ensure parent dir exists failed");
-                            e
-                        })?;
-                    tokio::fs::write(&output_path, body.slice(..))
-                        .await
-                        .map_err(|e| {
-                            error!(err = ?e, "writing file failed");
-                            e
-                        })?;
-                    info!(
-                        crate = %name,
-                        version = %vers.version,
-                        elapsed = ?millis(req_begin.elapsed()),
-                    );
-                    Ok(Some(output_path))
                 }
+
+                ensure_file_parent_dir_exists(&output_path)
+                    .await
+                    .map_err(|e| {
+                        error!(?output_path, err = ?e, "ensure parent dir exists failed");
+                        e
+                    })?;
+                tokio::fs::write(&output_path, body.slice(..))
+                    .await
+                    .map_err(|e| {
+                        error!(err = ?e, "writing file failed");
+                        e
+                    })?;
+                info!(
+                    crate = %name,
+                    version = %vers.version,
+                    elapsed = ?millis(req_begin.elapsed()),
+                );
+                Ok(Some(output_path))
             }
         });
 
