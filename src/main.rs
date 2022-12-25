@@ -11,6 +11,7 @@ use std::fs;
 use std::io::ErrorKind;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -21,10 +22,10 @@ use walkdir::{DirEntry, WalkDir};
 const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
 
 struct CrateVersion {
-    name: String,
-    vers: Version,
+    name: Arc<str>,
+    version: Version,
     #[allow(dead_code)]
-    cksum: [u8; 32],
+    checksum: [u8; 32],
 }
 
 /// Download all .crate files from a registry server.
@@ -62,11 +63,12 @@ fn is_hidden(entry: &DirEntry) -> bool {
 
 fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
     #[derive(Deserialize)]
-    struct LenientCrateVersion {
-        name: String,
-        vers: ProbablyVersion,
-        #[serde(with = "hex")]
-        cksum: [u8; 32],
+    struct LenientCrateVersion<'a> {
+        name: &'a str,
+        #[serde(rename = "vers")]
+        version: ProbablyVersion,
+        #[serde(rename = "cksum", with = "hex")]
+        checksum: [u8; 32],
     }
 
     enum ProbablyVersion {
@@ -111,7 +113,7 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
     let mut vec = Vec::new();
     for line in deserializer.into_iter::<LenientCrateVersion>() {
         let line = line?;
-        let version = match line.vers {
+        let version = match line.version {
             ProbablyVersion::Ok(version) => version,
             ProbablyVersion::Err { string, error } => {
                 error!(version = %string, ?path, "{}", error);
@@ -119,9 +121,9 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
             }
         };
         vec.push(CrateVersion {
-            name: line.name,
-            vers: version,
-            cksum: line.cksum,
+            name: Arc::from(line.name.to_owned()),
+            version,
+            checksum: line.checksum,
         });
     }
     Ok(vec)
@@ -216,7 +218,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
             let url = Url::parse(&format!(
                 "https://static.crates.io/crates/{name}/{name}-{version}.crate",
                 name = vers.name,
-                version = vers.vers,
+                version = vers.version,
             ))?;
 
             let name_lower = vers.name.to_ascii_lowercase();
@@ -229,7 +231,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
                     _ => vec![&name_lower[0..2], &name_lower[2..4]],
                 }))
                 .join(name_lower)
-                .join(format!("{}-{}.crate", vers.name, vers.vers));
+                .join(format!("{}-{}.crate", vers.name, vers.version));
 
             let req = http_client.get(url);
             let resp = req.send().await?;
@@ -255,7 +257,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
                     })?;
                 info!(
                     crate = %vers.name,
-                    version = %vers.vers,
+                    version = %vers.version,
                     elapsed = ?millis(req_begin.elapsed()),
                 );
                 Ok(Some(output_path))
