@@ -129,7 +129,7 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
         let version = match line.version {
             ProbablyVersion::Ok(version) => version,
             ProbablyVersion::Err { string, error } => {
-                error!(version = %string, ?path, "{}", error);
+                warn!(version = %string, ?path, "{}", error);
                 continue;
             }
         };
