@@ -41,7 +41,7 @@ struct CrateVersion {
 
 type Checksum = [u8; 32];
 
-/// Download all .crate files from a registry server.
+/// Download .crate files of all versions of all crates from crates.io.
 #[derive(Parser)]
 #[command(author, version)]
 struct Config {
