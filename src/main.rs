@@ -7,6 +7,7 @@ use rayon::ThreadPoolBuilder;
 use semver::Version;
 use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
+use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::fs;
 use std::io::ErrorKind;
@@ -327,6 +328,34 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
     ret
 }
 
+fn cmp_ignore_ascii_case(a: &str, b: &str) -> Ordering {
+    struct CaseAgnosticByte(u8);
+
+    impl Ord for CaseAgnosticByte {
+        fn cmp(&self, rhs: &Self) -> Ordering {
+            self.0.to_ascii_lowercase().cmp(&rhs.0.to_ascii_lowercase())
+        }
+    }
+
+    impl PartialOrd for CaseAgnosticByte {
+        fn partial_cmp(&self, rhs: &Self) -> Option<Ordering> {
+            Some(self.cmp(rhs))
+        }
+    }
+
+    impl Eq for CaseAgnosticByte {}
+
+    impl PartialEq for CaseAgnosticByte {
+        fn eq(&self, rhs: &Self) -> bool {
+            self.cmp(rhs) == Ordering::Equal
+        }
+    }
+
+    a.bytes()
+        .map(CaseAgnosticByte)
+        .cmp(b.bytes().map(CaseAgnosticByte))
+}
+
 fn main() -> anyhow::Result<()> {
     let begin = Instant::now();
 
@@ -337,7 +366,7 @@ fn main() -> anyhow::Result<()> {
     let config = Config::parse();
 
     let mut versions = get_all_crate_versions(&config)?;
-    versions.sort_unstable_by(|a, b| a.name.cmp(&b.name));
+    versions.sort_unstable_by(|a, b| cmp_ignore_ascii_case(&a.name, &b.name));
     if true {
         versions.truncate(50);
     }
