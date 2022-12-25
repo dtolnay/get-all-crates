@@ -1,6 +1,7 @@
 mod forbidden;
 
 use anyhow::bail;
+use bytes::Bytes;
 use clap::Parser;
 use crypto_hash::{Algorithm, Hasher};
 use futures::stream::StreamExt;
@@ -271,20 +272,10 @@ fn dir_for_crate(output_path: &Path, name: &str) -> PathBuf {
     path
 }
 
-#[derive(Default)]
-struct CollectLog;
-
-impl<E> Extend<Result<(), E>> for CollectLog
-where
-    E: Display,
-{
-    fn extend<T: IntoIterator<Item = Result<(), E>>>(&mut self, iter: T) {
-        for result in iter {
-            if let Err(err) = result {
-                error!("{}", err);
-            }
-        }
-    }
+struct Download {
+    output_path: PathBuf,
+    body: Bytes,
+    expected_checksum: Checksum,
 }
 
 async fn download_version(
@@ -292,7 +283,7 @@ async fn download_version(
     dir: PathBuf,
     name: &str,
     vers: &CrateVersion,
-) -> anyhow::Result<()> {
+) -> anyhow::Result<Option<Download>> {
     let mut output_path = dir;
     output_path.push(format!("{}-{}.crate", name, vers.version));
 
@@ -309,7 +300,7 @@ async fn download_version(
     if !status.is_success() {
         // Some crates in the index are consistently broken...
         if status == 403 && forbidden::known_broken(name, &vers.version) {
-            return Ok(());
+            return Ok(None);
         }
         bail!("{} {}", status, url_string);
     }
@@ -322,13 +313,11 @@ async fn download_version(
         elapsed = ?millis(req_begin.elapsed()),
     );
 
-    if vers.checksum == checksum(&body) {
-        fs::write(output_path, body)?;
-    } else {
-        error!(path = ?output_path, "checksum mismatch");
-    }
-
-    Ok(())
+    Ok(Some(Download {
+        output_path,
+        body,
+        expected_checksum: vers.checksum,
+    }))
 }
 
 async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
@@ -349,7 +338,26 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
 
     futures::stream::iter(iter)
         .buffer_unordered(config.max_concurrent_requests.get() as usize)
-        .collect::<CollectLog>()
+        .for_each_concurrent(None, |download| async {
+            match download {
+                Ok(Some(download)) => {
+                    let task = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+                        if download.expected_checksum == checksum(&download.body) {
+                            fs::write(download.output_path, download.body)?;
+                        } else {
+                            error!(path = ?download.output_path, "checksum mismatch");
+                        }
+                        Ok(())
+                    });
+                    match task.await.map_err(anyhow::Error::new) {
+                        Ok(Ok(())) => {}
+                        Ok(Err(err)) | Err(err) => error!("{}", err),
+                    }
+                }
+                Ok(None) => {}
+                Err(err) => error!("{}", err),
+            }
+        })
         .await;
 
     Ok(())
