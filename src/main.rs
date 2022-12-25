@@ -380,9 +380,6 @@ fn main() -> anyhow::Result<()> {
 
     let mut versions = get_all_crate_versions(&config)?;
     versions.sort_unstable_by(|a, b| cmp_ignore_ascii_case(&a.name, &b.name));
-    if true {
-        versions.truncate(50);
-    }
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
