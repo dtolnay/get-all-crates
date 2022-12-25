@@ -1,6 +1,7 @@
 use anyhow::bail;
 use bytes::Bytes;
 use clap::Parser;
+use crypto_hash::{Algorithm, Hasher};
 use futures::stream::StreamExt;
 use num_format::Locale;
 use parking_lot::Mutex;
@@ -10,7 +11,8 @@ use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
 use std::cmp::Ordering;
 use std::fmt::{self, Display};
-use std::fs;
+use std::fs::{self, File};
+use std::io::{Read, Write};
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -281,10 +283,21 @@ fn finish(result: DownloadResult) -> anyhow::Result<()> {
     match result {
         DownloadResult::Exists {
             path,
-            expected_checksum: _,
+            expected_checksum,
         } => {
-            let _bytes = fs::read(path)?;
-            // TODO: checksum
+            let mut hasher = Hasher::new(Algorithm::SHA256);
+            let mut file = File::open(&path)?;
+            let mut buf = [0; 64 * 1024];
+            loop {
+                let n = file.read(&mut buf)?;
+                if n == 0 {
+                    break;
+                }
+                hasher.write_all(&buf[..n])?;
+            }
+            if expected_checksum != *hasher.finish() {
+                error!(?path, "checksum mismatch");
+            }
             Ok(())
         }
         DownloadResult::Downloaded { path, body } => {
