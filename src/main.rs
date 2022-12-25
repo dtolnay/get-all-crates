@@ -320,7 +320,14 @@ async fn download_version(
         elapsed = ?millis(req_begin.elapsed()),
     );
 
-    fs::write(output_path, body.slice(..))?;
+    let mut hasher = Hasher::new(Algorithm::SHA256);
+    hasher.write_all(&body)?;
+    if vers.checksum == *hasher.finish() {
+        fs::write(output_path, body)?;
+    } else {
+        error!(path = ?output_path, "checksum mismatch");
+    }
+
     Ok(())
 }
 
