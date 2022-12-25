@@ -10,7 +10,6 @@ use serde::Deserialize;
 use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::fs;
-use std::io::ErrorKind;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -229,8 +228,20 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
 
     let iter = versions
         .iter()
-        .flat_map(|krate| krate.versions.iter().map(|vers| (&krate.name, vers)))
-        .map(|(name, vers)| {
+        .flat_map(|krate| {
+            let dir = dir_for_crate(&config.output_path, &krate.name);
+            let versions = match fs::create_dir_all(&dir) {
+                Ok(()) => &*krate.versions,
+                Err(err) => {
+                    error!(directory = ?dir, %err, "failed to create");
+                    &[]
+                }
+            };
+            versions
+                .iter()
+                .map(move |vers| (dir.clone(), &krate.name, vers))
+        })
+        .map(|(dir, name, vers)| {
             let req_begin = Instant::now();
             let http_client = http_client.clone();
 
@@ -240,8 +251,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
                     version = vers.version,
                 ))?;
 
-                let mut output_path = dir_for_crate(&config.output_path, name);
-                output_path.push(format!("{}-{}.crate", name, vers.version));
+                let output_path = dir.join(format!("{}-{}.crate", name, vers.version));
 
                 let req = http_client.get(url);
                 let resp = req.send().await?;
@@ -251,13 +261,6 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
                 if !status.is_success() {
                     error!(status = ?status, "download failed");
                     bail!("error response {:?} from server", status);
-                }
-
-                let dir = output_path.parent().unwrap();
-                if let Err(err) = tokio::fs::create_dir_all(dir).await {
-                    if err.kind() != ErrorKind::AlreadyExists {
-                        bail!("failed to create directory {}: {}", dir.display(), err);
-                    }
                 }
 
                 tokio::fs::write(&output_path, body.slice(..))
