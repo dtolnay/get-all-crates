@@ -180,9 +180,13 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
     });
 
     let crate_versions = crate_versions.into_inner();
+    let n_versions = crate_versions
+        .iter()
+        .map(|krate| krate.versions.len())
+        .sum();
     info!(
         n_crates = %thousands(n_crates),
-        n_versions = %thousands(crate_versions.len()),
+        n_versions = %thousands(n_versions),
         "collected",
     );
     Ok(crate_versions)
