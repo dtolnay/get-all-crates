@@ -4,8 +4,9 @@ use futures::stream::StreamExt;
 use parking_lot::Mutex;
 use rayon::ThreadPoolBuilder;
 use semver::Version;
+use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
-use serde_json::value::RawValue;
+use std::fmt;
 use std::fs;
 use std::io::ErrorKind;
 use std::num::{NonZeroU32, NonZeroUsize};
@@ -19,11 +20,9 @@ use walkdir::{DirEntry, WalkDir};
 
 const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
 
-#[derive(Deserialize)]
 struct CrateVersion {
     name: String,
     vers: Version,
-    #[serde(with = "hex")]
     #[allow(dead_code)]
     cksum: [u8; 32],
 }
@@ -62,15 +61,68 @@ fn is_hidden(entry: &DirEntry) -> bool {
 }
 
 fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
+    #[derive(Deserialize)]
+    struct LenientCrateVersion {
+        name: String,
+        vers: ProbablyVersion,
+        #[serde(with = "hex")]
+        cksum: [u8; 32],
+    }
+
+    enum ProbablyVersion {
+        Ok(Version),
+        Err {
+            string: String,
+            error: semver::Error,
+        },
+    }
+
+    impl<'de> Deserialize<'de> for ProbablyVersion {
+        fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+        where
+            D: Deserializer<'de>,
+        {
+            deserializer.deserialize_str(ProbablyVersionVisitor)
+        }
+    }
+
+    struct ProbablyVersionVisitor;
+
+    impl<'de> Visitor<'de> for ProbablyVersionVisitor {
+        type Value = ProbablyVersion;
+
+        fn expecting(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            formatter.write_str("semver version")
+        }
+
+        fn visit_str<E: serde::de::Error>(self, string: &str) -> Result<Self::Value, E> {
+            match Version::parse(string) {
+                Ok(version) => Ok(ProbablyVersion::Ok(version)),
+                Err(error) => Ok(ProbablyVersion::Err {
+                    string: string.to_owned(),
+                    error,
+                }),
+            }
+        }
+    }
+
     let content = fs::read(path)?;
     let deserializer = serde_json::Deserializer::from_slice(&content);
     let mut vec = Vec::new();
-    for line in deserializer.into_iter::<&RawValue>() {
-        let line = line?.get();
-        match serde_json::from_str(line) {
-            Ok(crate_version) => vec.push(crate_version),
-            Err(err) => error!(?path, "{},", err),
-        }
+    for line in deserializer.into_iter::<LenientCrateVersion>() {
+        let line = line?;
+        let version = match line.vers {
+            ProbablyVersion::Ok(version) => version,
+            ProbablyVersion::Err { string, error } => {
+                error!(version = %string, ?path, "{}", error);
+                continue;
+            }
+        };
+        vec.push(CrateVersion {
+            name: line.name,
+            vers: version,
+            cksum: line.cksum,
+        });
     }
     Ok(vec)
 }
