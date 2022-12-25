@@ -335,7 +335,10 @@ fn main() -> anyhow::Result<()> {
     info!("initializing...");
 
     let config = Config::parse();
-    let versions = get_all_crate_versions(&config)?;
+    let mut versions = get_all_crate_versions(&config)?;
+    if true {
+        versions.truncate(50);
+    }
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
