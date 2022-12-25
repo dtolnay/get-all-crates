@@ -335,7 +335,9 @@ fn main() -> anyhow::Result<()> {
     info!("initializing...");
 
     let config = Config::parse();
+
     let mut versions = get_all_crate_versions(&config)?;
+    versions.sort_unstable_by(|a, b| a.name.cmp(&b.name));
     if true {
         versions.truncate(50);
     }
