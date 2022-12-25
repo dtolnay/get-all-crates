@@ -1,12 +1,13 @@
 use anyhow::bail;
 use clap::Parser;
 use futures::stream::StreamExt;
+use num_format::Locale;
 use parking_lot::Mutex;
 use rayon::ThreadPoolBuilder;
 use semver::Version;
 use serde::de::{Deserializer, Visitor};
 use serde::Deserialize;
-use std::fmt;
+use std::fmt::{self, Display};
 use std::fs;
 use std::io::ErrorKind;
 use std::num::{NonZeroU32, NonZeroUsize};
@@ -177,7 +178,11 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
     });
 
     let crate_versions = crate_versions.into_inner();
-    info!(n_crates, n_versions = crate_versions.len(), "collected");
+    info!(
+        n_crates = %thousands(n_crates),
+        n_versions = %thousands(crate_versions.len()),
+        "collected",
+    );
     Ok(crate_versions)
 }
 
@@ -205,6 +210,20 @@ async fn ensure_file_parent_dir_exists(path: &Path) -> anyhow::Result<()> {
     } else {
         Ok(())
     }
+}
+
+fn thousands(n: usize) -> impl Display {
+    struct Thousands(usize);
+
+    impl Display for Thousands {
+        fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
+            let mut buffer = num_format::Buffer::new();
+            buffer.write_formatted(&self.0, &Locale::en);
+            formatter.write_str(buffer.as_str())
+        }
+    }
+
+    Thousands(n)
 }
 
 fn millis(duration: Duration) -> Duration {
