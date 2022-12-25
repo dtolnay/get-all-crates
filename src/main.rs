@@ -56,6 +56,10 @@ struct Config {
     /// Limit number of concurrent requests in flight
     #[arg(short = 'j', value_name = "INT", default_value = "50")]
     max_concurrent_requests: NonZeroU32,
+
+    /// Verify checksum of all previously downloaded crates
+    #[arg(long)]
+    verify: bool,
 }
 
 fn setup_tracing() {
@@ -209,8 +213,10 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
                     let path = output_dir.join(format!("{}-{}.crate", name, vers.version));
                     match path.try_exists() {
                         Ok(true) => {
-                            if let Err(err) = verify_checksum(&path, vers.checksum) {
-                                error!(?path, "{},", err);
+                            if config.verify {
+                                if let Err(err) = verify_checksum(&path, vers.checksum) {
+                                    error!(?path, "{},", err);
+                                }
                             }
                             false
                         }
