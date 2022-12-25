@@ -17,6 +17,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
 use tracing_subscriber::filter::EnvFilter;
+use tracing_subscriber::filter::{Directive, LevelFilter};
 use url::Url;
 use walkdir::{DirEntry, WalkDir};
 
@@ -47,7 +48,9 @@ struct Config {
 }
 
 fn setup_logger() {
-    let env_filter = EnvFilter::from_default_env();
+    let env_filter = EnvFilter::builder()
+        .with_default_directive(Directive::from(LevelFilter::INFO))
+        .from_env_lossy();
     let builder = tracing_subscriber::fmt()
         .with_env_filter(env_filter)
         .with_ansi(true);
