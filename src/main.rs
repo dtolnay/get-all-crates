@@ -12,7 +12,6 @@ use std::fs;
 use std::io::ErrorKind;
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 use tracing::{error, info, warn};
@@ -23,8 +22,12 @@ use walkdir::{DirEntry, WalkDir};
 
 const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
 
+struct CrateVersions {
+    name: String,
+    versions: Vec<CrateVersion>,
+}
+
 struct CrateVersion {
-    name: Arc<str>,
     version: Version,
     #[allow(dead_code)]
     checksum: [u8; 32],
@@ -66,7 +69,7 @@ fn is_hidden(entry: &DirEntry) -> bool {
         .unwrap_or(false)
 }
 
-fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
+fn get_crate_versions(path: &Path) -> anyhow::Result<CrateVersions> {
     #[derive(Deserialize)]
     struct LenientCrateVersion<'a> {
         name: &'a str,
@@ -116,20 +119,14 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
     let content = fs::read(path)?;
     let deserializer = serde_json::Deserializer::from_slice(&content);
     let mut vec = Vec::new();
-    let mut crate_name = None::<Arc<str>>;
+    let mut prev_name = None::<&str>;
     for line in deserializer.into_iter::<LenientCrateVersion>() {
         let line = line?;
-        let name = match &crate_name {
-            Some(arc) => {
-                assert_eq!(*line.name, **arc);
-                Arc::clone(arc)
-            }
-            None => {
-                let arc = Arc::from(line.name);
-                crate_name = Some(Arc::clone(&arc));
-                arc
-            }
-        };
+        if let Some(prev_name) = prev_name {
+            assert_eq!(line.name, prev_name);
+        } else {
+            prev_name = Some(line.name);
+        }
         let version = match line.version {
             ProbablyVersion::Ok(version) => version,
             ProbablyVersion::Err { string, error } => {
@@ -138,15 +135,17 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
             }
         };
         vec.push(CrateVersion {
-            name,
             version,
             checksum: line.checksum,
         });
     }
-    Ok(vec)
+    Ok(CrateVersions {
+        name: prev_name.unwrap().to_owned(),
+        versions: vec,
+    })
 }
 
-fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> {
+fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>> {
     let num_threads = thread::available_parallelism().map_or(1, NonZeroUsize::get);
     let thread_pool = ThreadPoolBuilder::new().num_threads(num_threads).build()?;
 
@@ -174,7 +173,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersion>> 
             scope.spawn(|_scope| {
                 let path = entry.into_path();
                 match get_crate_versions(&path) {
-                    Ok(vec) => crate_versions.lock().extend(vec),
+                    Ok(vec) => crate_versions.lock().push(vec),
                     Err(err) => error!(?path, "{},", err),
                 }
             });
@@ -234,7 +233,7 @@ fn millis(duration: Duration) -> Duration {
     Duration::from_millis(duration.as_millis() as u64)
 }
 
-async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyhow::Result<()> {
+async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
     let begin = Instant::now();
     ensure_dir_exists(&config.output_path).await?;
 
@@ -245,63 +244,67 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
         "downloading crates",
     );
 
-    let stream = futures::stream::iter(versions.into_iter().map(|vers| {
-        let req_begin = Instant::now();
-        let http_client = http_client.clone();
+    let iter = versions
+        .iter()
+        .flat_map(|krate| krate.versions.iter().map(|vers| (&krate.name, vers)))
+        .map(|(name, vers)| {
+            let req_begin = Instant::now();
+            let http_client = http_client.clone();
 
-        async move {
-            let url = Url::parse(&format!(
-                "https://static.crates.io/crates/{name}/{name}-{version}.crate",
-                name = vers.name,
-                version = vers.version,
-            ))?;
+            async move {
+                let url = Url::parse(&format!(
+                    "https://static.crates.io/crates/{name}/{name}-{version}.crate",
+                    version = vers.version,
+                ))?;
 
-            let name_lower = vers.name.to_ascii_lowercase();
-            let output_path = config
-                .output_path
-                .join(PathBuf::from_iter(match name_lower.len() {
-                    1 => vec!["1"],
-                    2 => vec!["2"],
-                    3 => vec!["3", &name_lower[..1]],
-                    _ => vec![&name_lower[0..2], &name_lower[2..4]],
-                }))
-                .join(name_lower)
-                .join(format!("{}-{}.crate", vers.name, vers.version));
+                let name_lower = name.to_ascii_lowercase();
+                let output_path = config
+                    .output_path
+                    .join(PathBuf::from_iter(match name_lower.len() {
+                        1 => vec!["1"],
+                        2 => vec!["2"],
+                        3 => vec!["3", &name_lower[..1]],
+                        _ => vec![&name_lower[0..2], &name_lower[2..4]],
+                    }))
+                    .join(name_lower)
+                    .join(format!("{}-{}.crate", name, vers.version));
 
-            let req = http_client.get(url);
-            let resp = req.send().await?;
-            let status = resp.status();
-            let body = resp.bytes().await?;
+                let req = http_client.get(url);
+                let resp = req.send().await?;
+                let status = resp.status();
+                let body = resp.bytes().await?;
 
-            if !status.is_success() {
-                error!(status = ?status, "download failed");
-                bail!("error response {:?} from server", status);
-            } else {
-                // TODO: check if this path exists already before downloading
-                ensure_file_parent_dir_exists(&output_path)
-                    .await
-                    .map_err(|e| {
-                        error!(?output_path, err = ?e, "ensure parent dir exists failed");
-                        e
-                    })?;
-                tokio::fs::write(&output_path, body.slice(..))
-                    .await
-                    .map_err(|e| {
-                        error!(err = ?e, "writing file failed");
-                        e
-                    })?;
-                info!(
-                    crate = %vers.name,
-                    version = %vers.version,
-                    elapsed = ?millis(req_begin.elapsed()),
-                );
-                Ok(Some(output_path))
+                if !status.is_success() {
+                    error!(status = ?status, "download failed");
+                    bail!("error response {:?} from server", status);
+                } else {
+                    // TODO: check if this path exists already before downloading
+                    ensure_file_parent_dir_exists(&output_path)
+                        .await
+                        .map_err(|e| {
+                            error!(?output_path, err = ?e, "ensure parent dir exists failed");
+                            e
+                        })?;
+                    tokio::fs::write(&output_path, body.slice(..))
+                        .await
+                        .map_err(|e| {
+                            error!(err = ?e, "writing file failed");
+                            e
+                        })?;
+                    info!(
+                        crate = %name,
+                        version = %vers.version,
+                        elapsed = ?millis(req_begin.elapsed()),
+                    );
+                    Ok(Some(output_path))
+                }
             }
-        }
-    }))
-    .buffer_unordered(config.max_concurrent_requests.get() as usize);
+        });
 
-    let results: Vec<anyhow::Result<Option<PathBuf>>> = stream.collect().await;
+    let results = futures::stream::iter(iter)
+        .buffer_unordered(config.max_concurrent_requests.get() as usize)
+        .collect::<Vec<anyhow::Result<Option<PathBuf>>>>()
+        .await;
 
     let mut ret = Ok(());
 
