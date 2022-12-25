@@ -1,7 +1,6 @@
 mod forbidden;
 
 use anyhow::bail;
-use bytes::Bytes;
 use clap::Parser;
 use crypto_hash::{Algorithm, Hasher};
 use futures::stream::StreamExt;
@@ -270,20 +269,12 @@ fn dir_for_crate(output_path: &Path, name: &str) -> PathBuf {
     path
 }
 
-enum DownloadResult {
-    Downloaded {
-        path: PathBuf,
-        body: Bytes,
-    },
-    Skip,
-}
-
 async fn download_version(
     http_client: &reqwest::Client,
     dir: PathBuf,
     name: &str,
     vers: &CrateVersion,
-) -> anyhow::Result<DownloadResult> {
+) -> anyhow::Result<()> {
     let mut output_path = dir;
     output_path.push(format!("{}-{}.crate", name, vers.version));
 
@@ -300,7 +291,7 @@ async fn download_version(
     if !status.is_success() {
         // Some crates in the index are consistently broken...
         if status == 403 && forbidden::known_broken(name, &vers.version) {
-            return Ok(DownloadResult::Skip);
+            return Ok(());
         }
         bail!("{} {}", status, url_string);
     }
@@ -313,20 +304,8 @@ async fn download_version(
         elapsed = ?millis(req_begin.elapsed()),
     );
 
-    Ok(DownloadResult::Downloaded {
-        path: output_path,
-        body,
-    })
-}
-
-fn finish(result: DownloadResult) -> anyhow::Result<()> {
-    match result {
-        DownloadResult::Downloaded { path, body } => {
-            fs::write(path, body.slice(..))?;
-            Ok(())
-        }
-        DownloadResult::Skip => Ok(()),
-    }
+    fs::write(output_path, body.slice(..))?;
+    Ok(())
 }
 
 async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
@@ -348,7 +327,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
     futures::stream::iter(iter)
         .buffer_unordered(config.max_concurrent_requests.get() as usize)
         .for_each(|download| async {
-            if let Err(err) = download.and_then(finish) {
+            if let Err(err) = download {
                 error!("{}", err);
             }
         })
