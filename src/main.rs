@@ -1,4 +1,5 @@
 use anyhow::bail;
+use bytes::Bytes;
 use clap::Parser;
 use futures::stream::StreamExt;
 use num_format::Locale;
@@ -218,44 +219,75 @@ fn dir_for_crate(output_path: &Path, name: &str) -> PathBuf {
     path
 }
 
+enum DownloadResult {
+    Exists {
+        path: PathBuf,
+        expected_checksum: [u8; 32],
+    },
+    Downloaded {
+        path: PathBuf,
+        body: Bytes,
+    },
+}
+
 async fn download_version(
     http_client: &reqwest::Client,
     dir: PathBuf,
     name: &str,
     vers: &CrateVersion,
-) -> anyhow::Result<Option<PathBuf>> {
-    let req_begin = Instant::now();
+) -> anyhow::Result<DownloadResult> {
+    let mut output_path = dir;
+    output_path.push(format!("{}-{}.crate", name, vers.version));
+    if output_path.try_exists()? {
+        return Ok(DownloadResult::Exists {
+            path: output_path,
+            expected_checksum: vers.checksum,
+        });
+    }
 
     let url = Url::parse(&format!(
         "https://static.crates.io/crates/{name}/{name}-{version}.crate",
         version = vers.version,
     ))?;
 
-    let mut output_path = dir;
-    output_path.push(format!("{}-{}.crate", name, vers.version));
-
+    let req_begin = Instant::now();
     let req = http_client.get(url);
     let resp = req.send().await?;
     let status = resp.status();
-    let body = resp.bytes().await?;
-
     if !status.is_success() {
         error!(status = ?status, "download failed");
         bail!("error response {:?} from server", status);
     }
 
-    tokio::fs::write(&output_path, body.slice(..))
-        .await
-        .map_err(|e| {
-            error!(err = ?e, "writing file failed");
-            e
-        })?;
+    let body = resp.bytes().await?;
+
     info!(
         crate = %name,
         version = %vers.version,
         elapsed = ?millis(req_begin.elapsed()),
     );
-    Ok(Some(output_path))
+
+    Ok(DownloadResult::Downloaded {
+        path: output_path,
+        body,
+    })
+}
+
+fn finish(result: DownloadResult) -> anyhow::Result<()> {
+    match result {
+        DownloadResult::Exists {
+            path,
+            expected_checksum: _,
+        } => {
+            let _bytes = fs::read(path)?;
+            // TODO: checksum
+            Ok(())
+        }
+        DownloadResult::Downloaded { path, body } => {
+            fs::write(path, body.slice(..))?;
+            Ok(())
+        }
+    }
 }
 
 async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
@@ -280,33 +312,16 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
             .map(move |vers| download_version(http_client, dir.clone(), &krate.name, vers))
     });
 
-    let results = futures::stream::iter(iter)
+    futures::stream::iter(iter)
         .buffer_unordered(config.max_concurrent_requests.get() as usize)
-        .collect::<Vec<anyhow::Result<Option<PathBuf>>>>()
+        .for_each(|download| async {
+            if let Err(err) = download.and_then(finish) {
+                error!(%err);
+            }
+        })
         .await;
 
-    let mut ret = Ok(());
-
-    let n = results.len();
-    let mut n_err = 0;
-    let mut n_skip = 0;
-    for result in results {
-        match result {
-            Ok(None) => n_skip += 1,
-
-            Err(e) => {
-                n_err += 1;
-                error!(err = ?e, "download failed");
-                ret = Err(e);
-            }
-
-            _ => {}
-        }
-    }
-
-    let n_ok = n - n_err - n_skip;
-    info!(n_ok, n_err, n_skip);
-    ret
+    Ok(())
 }
 
 fn cmp_ignore_ascii_case(a: &str, b: &str) -> Ordering {
