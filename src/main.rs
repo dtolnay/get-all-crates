@@ -35,8 +35,10 @@ struct CrateVersions {
 struct CrateVersion {
     version: Version,
     #[allow(dead_code)]
-    checksum: [u8; 32],
+    checksum: Checksum,
 }
+
+type Checksum = [u8; 32];
 
 /// Download all .crate files from a registry server.
 #[derive(Parser)]
@@ -81,7 +83,7 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<CrateVersions> {
         #[serde(rename = "vers")]
         version: ProbablyVersion,
         #[serde(rename = "cksum", with = "hex")]
-        checksum: [u8; 32],
+        checksum: Checksum,
     }
 
     enum ProbablyVersion {
@@ -235,7 +237,7 @@ fn dir_for_crate(output_path: &Path, name: &str) -> PathBuf {
 enum DownloadResult {
     Exists {
         path: PathBuf,
-        expected_checksum: [u8; 32],
+        expected_checksum: Checksum,
     },
     Downloaded {
         path: PathBuf,
