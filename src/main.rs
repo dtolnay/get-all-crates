@@ -218,65 +218,67 @@ fn dir_for_crate(output_path: &Path, name: &str) -> PathBuf {
     path
 }
 
+async fn download_version(
+    http_client: &reqwest::Client,
+    dir: PathBuf,
+    name: &str,
+    vers: &CrateVersion,
+) -> anyhow::Result<Option<PathBuf>> {
+    let req_begin = Instant::now();
+
+    let url = Url::parse(&format!(
+        "https://static.crates.io/crates/{name}/{name}-{version}.crate",
+        version = vers.version,
+    ))?;
+
+    let mut output_path = dir;
+    output_path.push(format!("{}-{}.crate", name, vers.version));
+
+    let req = http_client.get(url);
+    let resp = req.send().await?;
+    let status = resp.status();
+    let body = resp.bytes().await?;
+
+    if !status.is_success() {
+        error!(status = ?status, "download failed");
+        bail!("error response {:?} from server", status);
+    }
+
+    tokio::fs::write(&output_path, body.slice(..))
+        .await
+        .map_err(|e| {
+            error!(err = ?e, "writing file failed");
+            e
+        })?;
+    info!(
+        crate = %name,
+        version = %vers.version,
+        elapsed = ?millis(req_begin.elapsed()),
+    );
+    Ok(Some(output_path))
+}
+
 async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
-    let http_client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
+    let http_client = &reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
     info!(
         max_concurrency = config.max_concurrent_requests,
         "downloading crates",
     );
 
-    let iter = versions
-        .iter()
-        .flat_map(|krate| {
-            let dir = dir_for_crate(&config.output_path, &krate.name);
-            let versions = match fs::create_dir_all(&dir) {
-                Ok(()) => &*krate.versions,
-                Err(err) => {
-                    error!(directory = ?dir, %err, "failed to create");
-                    &[]
-                }
-            };
-            versions
-                .iter()
-                .map(move |vers| (dir.clone(), &krate.name, vers))
-        })
-        .map(|(dir, name, vers)| {
-            let req_begin = Instant::now();
-            let http_client = http_client.clone();
-
-            async move {
-                let url = Url::parse(&format!(
-                    "https://static.crates.io/crates/{name}/{name}-{version}.crate",
-                    version = vers.version,
-                ))?;
-
-                let output_path = dir.join(format!("{}-{}.crate", name, vers.version));
-
-                let req = http_client.get(url);
-                let resp = req.send().await?;
-                let status = resp.status();
-                let body = resp.bytes().await?;
-
-                if !status.is_success() {
-                    error!(status = ?status, "download failed");
-                    bail!("error response {:?} from server", status);
-                }
-
-                tokio::fs::write(&output_path, body.slice(..))
-                    .await
-                    .map_err(|e| {
-                        error!(err = ?e, "writing file failed");
-                        e
-                    })?;
-                info!(
-                    crate = %name,
-                    version = %vers.version,
-                    elapsed = ?millis(req_begin.elapsed()),
-                );
-                Ok(Some(output_path))
+    let iter = versions.iter().flat_map(|krate| {
+        let dir = dir_for_crate(&config.output_path, &krate.name);
+        let versions = match fs::create_dir_all(&dir) {
+            Ok(()) => &*krate.versions,
+            Err(err) => {
+                error!(directory = ?dir, %err, "failed to create");
+                &[]
             }
-        });
+        };
+        versions
+            .iter()
+            .map(move |vers| download_version(http_client, dir.clone(), &krate.name, vers))
+    });
 
     let results = futures::stream::iter(iter)
         .buffer_unordered(config.max_concurrent_requests.get() as usize)
