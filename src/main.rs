@@ -111,8 +111,20 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
     let content = fs::read(path)?;
     let deserializer = serde_json::Deserializer::from_slice(&content);
     let mut vec = Vec::new();
+    let mut crate_name = None::<Arc<str>>;
     for line in deserializer.into_iter::<LenientCrateVersion>() {
         let line = line?;
+        let name = match &crate_name {
+            Some(arc) => {
+                assert_eq!(*line.name, **arc);
+                Arc::clone(arc)
+            }
+            None => {
+                let arc = Arc::from(line.name);
+                crate_name = Some(Arc::clone(&arc));
+                arc
+            }
+        };
         let version = match line.version {
             ProbablyVersion::Ok(version) => version,
             ProbablyVersion::Err { string, error } => {
@@ -121,7 +133,7 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<Vec<CrateVersion>> {
             }
         };
         vec.push(CrateVersion {
-            name: Arc::from(line.name.to_owned()),
+            name,
             version,
             checksum: line.checksum,
         });
