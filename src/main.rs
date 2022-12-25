@@ -188,32 +188,6 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
     Ok(crate_versions)
 }
 
-async fn ensure_dir_exists(path: &Path) -> anyhow::Result<()> {
-    match tokio::fs::metadata(path).await {
-        Ok(meta) if meta.is_dir() => Ok(()),
-
-        Ok(meta) /* if ! meta.is_dir() */ => {
-            debug_assert!( ! meta.is_dir());
-            bail!("path exists, but is not a directory: {:?}", path);
-        }
-
-        Err(e) if e.kind() == ErrorKind::NotFound => {
-            tokio::fs::create_dir_all(&path).await?;
-            Ok(())
-        }
-
-        Err(e) => Err(e.into()),
-    }
-}
-
-async fn ensure_file_parent_dir_exists(path: &Path) -> anyhow::Result<()> {
-    if let Some(parent_dir) = path.parent() {
-        ensure_dir_exists(parent_dir).await
-    } else {
-        Ok(())
-    }
-}
-
 fn thousands(n: usize) -> impl Display {
     struct Thousands(usize);
 
@@ -233,8 +207,6 @@ fn millis(duration: Duration) -> Duration {
 }
 
 async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
-    ensure_dir_exists(&config.output_path).await?;
-
     let http_client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
     info!(
@@ -277,12 +249,13 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
                     bail!("error response {:?} from server", status);
                 }
 
-                ensure_file_parent_dir_exists(&output_path)
-                    .await
-                    .map_err(|e| {
-                        error!(?output_path, err = ?e, "ensure parent dir exists failed");
-                        e
-                    })?;
+                let dir = output_path.parent().unwrap();
+                if let Err(err) = tokio::fs::create_dir_all(dir).await {
+                    if err.kind() != ErrorKind::AlreadyExists {
+                        bail!("failed to create directory {}: {}", dir.display(), err);
+                    }
+                }
+
                 tokio::fs::write(&output_path, body.slice(..))
                     .await
                     .map_err(|e| {
