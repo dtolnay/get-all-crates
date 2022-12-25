@@ -2,12 +2,10 @@ use anyhow::bail;
 use clap::Parser;
 use futures::stream::StreamExt;
 use parking_lot::Mutex;
-use pretty_toa::ThousandsSep;
 use rayon::ThreadPoolBuilder;
 use semver::Version;
 use serde::Deserialize;
 use serde_json::value::RawValue;
-use std::fmt::{self, Display};
 use std::fs;
 use std::io::ErrorKind;
 use std::num::{NonZeroU32, NonZeroUsize};
@@ -143,30 +141,6 @@ async fn ensure_file_parent_dir_exists(path: &Path) -> anyhow::Result<()> {
     }
 }
 
-fn filesize(bytes: usize) -> impl Display {
-    struct FileSize {
-        bytes: usize,
-    }
-
-    impl Display for FileSize {
-        fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
-            let kb = self.bytes as f64 / 1024.0;
-            let mb = kb / 1024.0;
-            let (quantity, suffix) = if mb > 2048.0 {
-                let gb = mb / 1024.0;
-                ((gb * 100.0).round() / 100.0, 'G')
-            } else if mb < 0.75 {
-                ((kb * 10.0).round() / 10.0, 'K')
-            } else {
-                ((mb * 10.0).round() / 10.0, 'M')
-            };
-            write!(formatter, "{}{}", quantity.thousands_sep(), suffix)
-        }
-    }
-
-    FileSize { bytes }
-}
-
 fn millis(duration: Duration) -> Duration {
     Duration::from_millis(duration.as_millis() as u64)
 }
@@ -230,7 +204,6 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
                 info!(
                     crate = %vers.name,
                     version = %vers.vers,
-                    size = %filesize(body.len()),
                     elapsed = ?millis(req_begin.elapsed()),
                 );
                 Ok(Some(output_path))

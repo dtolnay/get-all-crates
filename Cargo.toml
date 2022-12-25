@@ -13,7 +13,6 @@ clap = { version = "4", default-features = false, features = ["cargo", "color", 
 futures = "0.3.7"
 hex = { version = "0.4", features = ["serde"] }
 parking_lot = "0.12"
-pretty_toa = "1"
 rayon = "1"
 reqwest = { version = "0.11", default-features = false, features = ["json", "stream", "rustls-tls", "cookies", "multipart", "gzip", "brotli", "deflate", "trust-dns"] }
 semver = { version = "1", features = ["serde"] }
