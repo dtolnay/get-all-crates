@@ -232,7 +232,6 @@ fn millis(duration: Duration) -> Duration {
 }
 
 async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
-    let begin = Instant::now();
     ensure_dir_exists(&config.output_path).await?;
 
     let http_client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
@@ -324,15 +323,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
     }
 
     let n_ok = n - n_err - n_skip;
-    info!(
-        n_ok,
-        n_err,
-        n_skip,
-        "finished downloading {} files in {:?}",
-        n_ok,
-        millis(begin.elapsed())
-    );
-
+    info!(n_ok, n_err, n_skip);
     ret
 }
 
