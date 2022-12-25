@@ -251,18 +251,18 @@ async fn download_version(
         });
     }
 
-    let url = Url::parse(&format!(
+    let url_string = format!(
         "https://static.crates.io/crates/{name}/{name}-{version}.crate",
         version = vers.version,
-    ))?;
+    );
+    let url = Url::parse(&url_string)?;
 
     let req_begin = Instant::now();
     let req = http_client.get(url);
     let resp = req.send().await?;
     let status = resp.status();
     if !status.is_success() {
-        error!(status = ?status, "download failed");
-        bail!("error response {:?} from server", status);
+        bail!("{} {}", status, url_string);
     }
 
     let body = resp.bytes().await?;
@@ -333,7 +333,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
         .buffer_unordered(config.max_concurrent_requests.get() as usize)
         .for_each(|download| async {
             if let Err(err) = download.and_then(finish) {
-                error!(%err);
+                error!("{}", err);
             }
         })
         .await;
