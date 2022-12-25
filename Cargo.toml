@@ -13,6 +13,7 @@ clap = { version = "4", default-features = false, features = ["cargo", "color", 
 crypto-hash = "0.3"
 futures = "0.3.7"
 hex = { version = "0.4", features = ["serde"] }
+memmap2 = "0.5"
 num-format = "0.4"
 parking_lot = "0.12"
 rayon = "1"

@@ -4,6 +4,7 @@ use anyhow::bail;
 use clap::Parser;
 use crypto_hash::{Algorithm, Hasher};
 use futures::stream::StreamExt;
+use memmap2::Mmap;
 use num_format::Locale;
 use parking_lot::Mutex;
 use rayon::ThreadPoolBuilder;
@@ -13,7 +14,7 @@ use serde::Deserialize;
 use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::fs::{self, File};
-use std::io::{self, Read, Write};
+use std::io::{self, Write};
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -75,18 +76,19 @@ fn is_hidden(entry: &DirEntry) -> bool {
         .unwrap_or(false)
 }
 
-fn verify_crate_version(crate_file_path: &Path, expected_checksum: Checksum) -> io::Result<()> {
+fn checksum(bytes: &[u8]) -> Checksum {
     let mut hasher = Hasher::new(Algorithm::SHA256);
-    let mut file = File::open(crate_file_path)?;
-    let mut buf = [0; 64 * 1024];
-    loop {
-        let n = file.read(&mut buf)?;
-        if n == 0 {
-            break;
-        }
-        hasher.write_all(&buf[..n])?;
-    }
-    if expected_checksum != *hasher.finish() {
+    hasher.write_all(bytes).unwrap();
+    let mut checksum = [0; 32];
+    checksum.copy_from_slice(&hasher.finish());
+    checksum
+}
+
+fn verify_checksum(crate_file_path: &Path, expected_checksum: Checksum) -> io::Result<()> {
+    let actual_checksum = match File::open(crate_file_path)? {
+        file => checksum(&unsafe { Mmap::map(&file) }?),
+    };
+    if expected_checksum != actual_checksum {
         error!(path = ?crate_file_path, "checksum mismatch");
     }
     Ok(())
@@ -206,7 +208,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
                     let path = output_dir.join(format!("{}-{}.crate", name, vers.version));
                     match path.try_exists() {
                         Ok(true) => {
-                            if let Err(err) = verify_crate_version(&path, vers.checksum) {
+                            if let Err(err) = verify_checksum(&path, vers.checksum) {
                                 error!(?path, "{},", err);
                             }
                             false
@@ -320,9 +322,7 @@ async fn download_version(
         elapsed = ?millis(req_begin.elapsed()),
     );
 
-    let mut hasher = Hasher::new(Algorithm::SHA256);
-    hasher.write_all(&body)?;
-    if vers.checksum == *hasher.finish() {
+    if vers.checksum == checksum(&body) {
         fs::write(output_path, body)?;
     } else {
         error!(path = ?output_path, "checksum mismatch");
