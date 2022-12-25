@@ -206,6 +206,19 @@ fn millis(duration: Duration) -> Duration {
     Duration::from_millis(duration.as_millis() as u64)
 }
 
+fn dir_for_crate(output_path: &Path, name: &str) -> PathBuf {
+    let mut path = output_path.to_owned();
+    let name_lower = name.to_ascii_lowercase();
+    match name_lower.len() {
+        1 => path.push("1"),
+        2 => path.push("2"),
+        3 => path.extend(["3", &name_lower[..1]]),
+        _ => path.extend([&name_lower[0..2], &name_lower[2..4]]),
+    }
+    path.push(name_lower);
+    path
+}
+
 async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
     let http_client = reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
@@ -227,17 +240,8 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
                     version = vers.version,
                 ))?;
 
-                let name_lower = name.to_ascii_lowercase();
-                let output_path = config
-                    .output_path
-                    .join(PathBuf::from_iter(match name_lower.len() {
-                        1 => vec!["1"],
-                        2 => vec!["2"],
-                        3 => vec!["3", &name_lower[..1]],
-                        _ => vec![&name_lower[0..2], &name_lower[2..4]],
-                    }))
-                    .join(name_lower)
-                    .join(format!("{}-{}.crate", name, vers.version));
+                let mut output_path = dir_for_crate(&config.output_path, name);
+                output_path.push(format!("{}-{}.crate", name, vers.version));
 
                 let req = http_client.get(url);
                 let resp = req.send().await?;
