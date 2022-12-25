@@ -269,6 +269,22 @@ fn dir_for_crate(output_path: &Path, name: &str) -> PathBuf {
     path
 }
 
+#[derive(Default)]
+struct CollectLog;
+
+impl<E> Extend<Result<(), E>> for CollectLog
+where
+    E: Display,
+{
+    fn extend<T: IntoIterator<Item = Result<(), E>>>(&mut self, iter: T) {
+        for result in iter {
+            if let Err(err) = result {
+                error!("{}", err);
+            }
+        }
+    }
+}
+
 async fn download_version(
     http_client: &reqwest::Client,
     dir: PathBuf,
@@ -326,11 +342,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
 
     futures::stream::iter(iter)
         .buffer_unordered(config.max_concurrent_requests.get() as usize)
-        .for_each(|download| async {
-            if let Err(err) = download {
-                error!("{}", err);
-            }
-        })
+        .collect::<CollectLog>()
         .await;
 
     Ok(())
