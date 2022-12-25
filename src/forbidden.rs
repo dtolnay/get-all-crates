@@ -1,5 +1,10 @@
 use semver::Version;
 
+// Some crates in the index have download URLs that consistently return HTTP
+// 403 (forbidden). It seems like someone should remove these from the index
+// altogether... but for now we handle this by still attempting every download,
+// but silently swallowing the error if the failing crate is one of the
+// following known broken crate versions.
 const KNOWN_BROKEN: &[(&str, Version)] = &[
     ("bork", Version::new(0, 0, 0)),
     ("bork", Version::new(0, 1, 0)),
