@@ -399,13 +399,11 @@ fn cmp_ignore_ascii_case(a: &str, b: &str) -> Ordering {
 }
 
 fn main() -> anyhow::Result<()> {
-    let begin = Instant::now();
+    let config = Config::parse();
 
     setup_tracing();
 
-    info!("initializing...");
-
-    let config = Config::parse();
+    let begin = Instant::now();
 
     let mut versions = get_all_crate_versions(&config)?;
     versions.sort_unstable_by(|a, b| cmp_ignore_ascii_case(&a.name, &b.name));
