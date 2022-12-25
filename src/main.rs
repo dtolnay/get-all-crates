@@ -14,7 +14,7 @@ use serde::Deserialize;
 use std::cmp::Ordering;
 use std::fmt::{self, Display};
 use std::fs::{self, File};
-use std::io::{Read, Write};
+use std::io::{self, Read, Write};
 use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::thread;
@@ -74,6 +74,23 @@ fn is_hidden(entry: &DirEntry) -> bool {
         .to_str()
         .map(|s| s.starts_with('.'))
         .unwrap_or(false)
+}
+
+fn verify_crate_version(crate_file_path: &Path, expected_checksum: Checksum) -> io::Result<()> {
+    let mut hasher = Hasher::new(Algorithm::SHA256);
+    let mut file = File::open(crate_file_path)?;
+    let mut buf = [0; 64 * 1024];
+    loop {
+        let n = file.read(&mut buf)?;
+        if n == 0 {
+            break;
+        }
+        hasher.write_all(&buf[..n])?;
+    }
+    if expected_checksum != *hasher.finish() {
+        error!(path = ?crate_file_path, "checksum mismatch");
+    }
+    Ok(())
 }
 
 fn get_crate_versions(path: &Path) -> anyhow::Result<CrateVersions> {
@@ -177,15 +194,34 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
             n_crates += 1;
             scope.spawn(|_scope| {
                 let path = entry.into_path();
-                let vers = match get_crate_versions(&path) {
+                let mut vers = match get_crate_versions(&path) {
                     Ok(vers) => vers,
                     Err(err) => return error!(?path, "{},", err),
                 };
-                let output_dir = dir_for_crate(&config.output_path, &vers.name);
+                let name = &vers.name;
+                let output_dir = dir_for_crate(&config.output_path, name);
                 if let Err(err) = fs::create_dir_all(&output_dir) {
                     error!(directory = ?output_dir, %err, "failed to create");
                 }
-                crate_versions.lock().push(vers);
+                vers.versions.retain(|vers| {
+                    let path = output_dir.join(format!("{}-{}.crate", name, vers.version));
+                    match path.try_exists() {
+                        Ok(true) => {
+                            if let Err(err) = verify_crate_version(&path, vers.checksum) {
+                                error!(?path, "{},", err);
+                            }
+                            false
+                        }
+                        Ok(false) => true,
+                        Err(err) => {
+                            error!(?path, "{},", err);
+                            false
+                        }
+                    }
+                });
+                if !vers.versions.is_empty() {
+                    crate_versions.lock().push(vers);
+                }
             });
         }
     });
@@ -235,10 +271,6 @@ fn dir_for_crate(output_path: &Path, name: &str) -> PathBuf {
 }
 
 enum DownloadResult {
-    Exists {
-        path: PathBuf,
-        expected_checksum: Checksum,
-    },
     Downloaded {
         path: PathBuf,
         body: Bytes,
@@ -254,12 +286,6 @@ async fn download_version(
 ) -> anyhow::Result<DownloadResult> {
     let mut output_path = dir;
     output_path.push(format!("{}-{}.crate", name, vers.version));
-    if output_path.try_exists()? {
-        return Ok(DownloadResult::Exists {
-            path: output_path,
-            expected_checksum: vers.checksum,
-        });
-    }
 
     let url_string = format!(
         "https://static.crates.io/crates/{name}/{name}-{version}.crate",
@@ -295,25 +321,6 @@ async fn download_version(
 
 fn finish(result: DownloadResult) -> anyhow::Result<()> {
     match result {
-        DownloadResult::Exists {
-            path,
-            expected_checksum,
-        } => {
-            let mut hasher = Hasher::new(Algorithm::SHA256);
-            let mut file = File::open(&path)?;
-            let mut buf = [0; 64 * 1024];
-            loop {
-                let n = file.read(&mut buf)?;
-                if n == 0 {
-                    break;
-                }
-                hasher.write_all(&buf[..n])?;
-            }
-            if expected_checksum != *hasher.finish() {
-                error!(?path, "checksum mismatch");
-            }
-            Ok(())
-        }
         DownloadResult::Downloaded { path, body } => {
             fs::write(path, body.slice(..))?;
             Ok(())
