@@ -1,3 +1,5 @@
+mod forbidden;
+
 use anyhow::bail;
 use bytes::Bytes;
 use clap::Parser;
@@ -234,6 +236,7 @@ enum DownloadResult {
         path: PathBuf,
         body: Bytes,
     },
+    Skip,
 }
 
 async fn download_version(
@@ -262,6 +265,10 @@ async fn download_version(
     let resp = req.send().await?;
     let status = resp.status();
     if !status.is_success() {
+        // Some crates in the index are consistently broken...
+        if status == 403 && forbidden::known_broken(name, &vers.version) {
+            return Ok(DownloadResult::Skip);
+        }
         bail!("{} {}", status, url_string);
     }
 
@@ -304,6 +311,7 @@ fn finish(result: DownloadResult) -> anyhow::Result<()> {
             fs::write(path, body.slice(..))?;
             Ok(())
         }
+        DownloadResult::Skip => Ok(()),
     }
 }
 
