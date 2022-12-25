@@ -1,3 +1,9 @@
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::map_unwrap_or,
+    clippy::match_single_binding
+)]
+
 mod forbidden;
 
 use anyhow::bail;
