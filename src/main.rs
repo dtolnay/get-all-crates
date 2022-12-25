@@ -47,14 +47,15 @@ struct Config {
     max_concurrent_requests: NonZeroU32,
 }
 
-fn setup_logger() {
+fn setup_tracing() {
     let env_filter = EnvFilter::builder()
         .with_default_directive(Directive::from(LevelFilter::INFO))
         .from_env_lossy();
-    let builder = tracing_subscriber::fmt()
+    tracing_subscriber::fmt()
         .with_env_filter(env_filter)
-        .with_ansi(true);
-    builder.init();
+        .without_time()
+        .with_target(false)
+        .init();
 }
 
 fn is_hidden(entry: &DirEntry) -> bool {
@@ -337,7 +338,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersion>) -> anyh
 fn main() -> anyhow::Result<()> {
     let begin = Instant::now();
 
-    setup_logger();
+    setup_tracing();
 
     info!("initializing...");
 
