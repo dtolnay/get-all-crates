@@ -1,6 +1,10 @@
 get-all-crates
 ==============
 
+[<img alt="github" src="https://img.shields.io/badge/github-dtolnay/get--all--crates-8da0cb?style=for-the-badge&labelColor=555555&logo=github" height="20">](https://github.com/dtolnay/get-all-crates)
+[<img alt="crates.io" src="https://img.shields.io/crates/v/get-all-crates.svg?style=for-the-badge&color=fc8d62&logo=rust" height="20">](https://crates.io/crates/get-all-crates)
+[<img alt="build status" src="https://img.shields.io/github/actions/workflow/status/dtolnay/get-all-crates/ci.yml?branch=master&style=for-the-badge" height="20">](https://github.com/dtolnay/get-all-crates/actions?query=branch%3Amaster)
+
 Download _.crate_ files of all versions of all crates from crates.io.
 
 Useful for things like [noisy-clippy](https://github.com/dtolnay/noisy-clippy)
