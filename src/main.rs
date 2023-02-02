@@ -1,7 +1,9 @@
 #![allow(clippy::cast_possible_truncation, clippy::match_single_binding)]
 
+mod crateversion;
 mod forbidden;
 
+use crate::crateversion::{Checksum, CrateVersion};
 use anyhow::bail;
 use bytes::Bytes;
 use clap::Parser;
@@ -34,14 +36,6 @@ struct CrateVersions {
     name: String,
     versions: Vec<CrateVersion>,
 }
-
-struct CrateVersion {
-    version: Version,
-    #[allow(dead_code)]
-    checksum: Checksum,
-}
-
-type Checksum = [u8; 32];
 
 /// Download .crate files of all versions of all crates from crates.io.
 #[derive(Parser)]
