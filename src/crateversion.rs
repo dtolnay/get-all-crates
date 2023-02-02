@@ -1,6 +1,7 @@
 use semver::Version;
 use std::cmp::Ordering;
 
+#[derive(Clone)]
 pub struct CrateVersion {
     pub version: Version,
     #[allow(dead_code)]

@@ -49,6 +49,10 @@ struct Config {
     #[arg(long = "out", value_name = "PATH")]
     output_path: PathBuf,
 
+    /// Only get highest non-prerelease non-yanked version of each crate
+    #[arg(long)]
+    latest: bool,
+
     /// Limit number of concurrent requests in flight
     #[arg(short = 'j', value_name = "INT", default_value = "50")]
     max_concurrent_requests: NonZeroU32,
@@ -94,7 +98,7 @@ fn verify_checksum(crate_file_path: &Path, expected_checksum: Checksum) -> io::R
     Ok(())
 }
 
-fn get_crate_versions(path: &Path) -> anyhow::Result<CrateVersions> {
+fn get_crate_versions(path: &Path, config: &Config) -> anyhow::Result<CrateVersions> {
     #[derive(Deserialize)]
     struct LenientCrateVersion<'a> {
         name: &'a str,
@@ -102,6 +106,7 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<CrateVersions> {
         version: ProbablyVersion,
         #[serde(rename = "cksum", with = "hex")]
         checksum: Checksum,
+        yanked: bool,
     }
 
     enum ProbablyVersion {
@@ -147,6 +152,9 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<CrateVersions> {
     let mut crate_name = None;
     for line in deserializer.into_iter::<LenientCrateVersion>() {
         let line = line?;
+        if config.latest && line.yanked {
+            continue;
+        }
         crate_name = Some(line.name);
         let version = match line.version {
             ProbablyVersion::Ok(version) => version,
@@ -160,6 +168,17 @@ fn get_crate_versions(path: &Path) -> anyhow::Result<CrateVersions> {
             checksum: line.checksum,
         });
     }
+
+    if config.latest && !vec.is_empty() {
+        let max_non_prerelease = vec.iter().filter(|v| v.version.pre.is_empty()).max();
+        let max = if let Some(max_non_prerelease) = max_non_prerelease {
+            max_non_prerelease
+        } else {
+            vec.iter().max().unwrap()
+        };
+        vec = vec![max.clone()];
+    }
+
     Ok(CrateVersions {
         name: crate_name
             .unwrap_or_else(|| path.file_name().unwrap().to_str().unwrap())
@@ -195,7 +214,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
             n_crates += 1;
             scope.spawn(|_scope| {
                 let path = entry.into_path();
-                let mut vers = match get_crate_versions(&path) {
+                let mut vers = match get_crate_versions(&path, config) {
                     Ok(vers) => vers,
                     Err(err) => return error!(?path, "{},", err),
                 };
