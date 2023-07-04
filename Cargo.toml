@@ -10,7 +10,7 @@ repository = "https://github.com/dtolnay/get-all-crates"
 [dependencies]
 anyhow = "1"
 bytes = "1"
-clap = { version = "4", default-features = false, features = ["cargo", "color", "derive", "deprecated", "help", "std", "usage"] }
+clap = { version = "4", default-features = false, features = ["cargo", "color", "deprecated", "derive", "help", "std", "usage"] }
 crypto-hash = "0.3"
 futures = "0.3.7"
 hex = { version = "0.4", features = ["serde"] }
@@ -18,7 +18,7 @@ memmap2 = "0.7"
 num-format = "0.4"
 parking_lot = "0.12"
 rayon = "1"
-reqwest = { version = "0.11", default-features = false, features = ["json", "stream", "rustls-tls", "cookies", "multipart", "gzip", "brotli", "deflate", "trust-dns"] }
+reqwest = { version = "0.11", default-features = false, features = ["brotli", "cookies", "deflate", "gzip", "json", "multipart", "rustls-tls", "stream", "trust-dns"] }
 semver = "1"
 serde = "1"
 serde_derive = "1"
