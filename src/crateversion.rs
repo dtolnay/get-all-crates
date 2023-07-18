@@ -26,7 +26,7 @@ impl Ord for CrateVersion {
 
 impl PartialOrd for CrateVersion {
     fn partial_cmp(&self, other: &Self) -> Option<Ordering> {
-        Some(Ord::cmp(self, other))
+        Some(self.cmp(other))
     }
 }
 
