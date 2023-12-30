@@ -1,4 +1,8 @@
-#![allow(clippy::cast_possible_truncation, clippy::match_single_binding)]
+#![allow(
+    clippy::cast_possible_truncation,
+    clippy::match_single_binding,
+    clippy::unconditional_recursion, // https://github.com/rust-lang/rust-clippy/issues/12052
+)]
 
 mod crateversion;
 mod forbidden;
