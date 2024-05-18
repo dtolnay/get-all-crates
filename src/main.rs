@@ -285,28 +285,31 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<AllCrateVersions> {
                     Err(err) => return error!(?path, "{},", err),
                 };
                 let name = &vers.name;
-                let output_dir = dir_for_crate(&config.output_path, name);
-                if let Err(err) = fs::create_dir_all(&output_dir) {
-                    error!(directory = ?output_dir, %err, "failed to create");
-                }
-                vers.versions.retain(|vers| {
-                    let path = output_dir.join(format!("{}-{}.crate", name, vers.version));
-                    match path.try_exists() {
-                        Ok(true) => {
-                            if config.verify {
-                                if let Err(err) = verify_checksum(&path, vers.checksum) {
-                                    error!(?path, "{},", err);
-                                }
-                            }
-                            false
-                        }
-                        Ok(false) => true,
-                        Err(err) => {
-                            error!(?path, "{},", err);
-                            false
-                        }
+                // Create output dir only if there are any applicable crate versions.
+                if !config.dry_run && !vers.versions.is_empty() {
+                    let output_dir = dir_for_crate(&config.output_path, name);
+                    if let Err(err) = fs::create_dir_all(&output_dir) {
+                        error!(directory = ?output_dir, %err, "failed to create");
                     }
-                });
+                    vers.versions.retain(|vers| {
+                        let path = output_dir.join(format!("{}-{}.crate", name, vers.version));
+                        match path.try_exists() {
+                            Ok(true) => {
+                                if config.verify {
+                                    if let Err(err) = verify_checksum(&path, vers.checksum) {
+                                        error!(?path, "{},", err);
+                                    }
+                                }
+                                false
+                            }
+                            Ok(false) => true,
+                            Err(err) => {
+                                error!(?path, "{},", err);
+                                false
+                            }
+                        }
+                    });
+                }
                 if !vers.versions.is_empty() {
                     crate_versions.lock().push(vers);
                 }
