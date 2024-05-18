@@ -20,7 +20,7 @@ use memmap2::Mmap;
 use num_format::Locale;
 use parking_lot::Mutex;
 use rayon::ThreadPoolBuilder;
-use semver::Version;
+use semver::{Version, VersionReq};
 use serde::de::{Deserialize, Deserializer, Visitor};
 use serde_derive::Deserialize;
 use std::cmp::Ordering;
@@ -64,6 +64,15 @@ struct Config {
     /// Only get highest non-prerelease non-yanked version of each crate
     #[arg(long)]
     latest: bool,
+
+    /// Only get versions depending on the following crate
+    #[arg(long)]
+    dependency: Option<String>,
+
+    // TODO: Make these options dependent.
+    /// Only get versions depending on the folling version of the specified dependency
+    #[arg(long)]
+    dependency_version: Option<Version>,
 
     /// Limit number of concurrent requests in flight
     #[arg(short = 'j', value_name = "INT", default_value = "50")]
@@ -120,12 +129,19 @@ fn verify_checksum(crate_file_path: &Path, expected_checksum: Checksum) -> io::R
 
 fn get_crate_versions(path: &Path, config: &Config) -> anyhow::Result<CrateVersions> {
     #[derive(Deserialize)]
+    struct LenientDependency<'a> {
+        name: &'a str,
+        req: &'a str,
+    }
+
+    #[derive(Deserialize)]
     struct LenientCrateVersion<'a> {
         name: &'a str,
         #[serde(rename = "vers")]
         version: ProbablyVersion,
         #[serde(rename = "cksum", with = "hex")]
         checksum: Checksum,
+        deps: Vec<LenientDependency<'a>>,
         yanked: bool,
     }
 
@@ -183,10 +199,32 @@ fn get_crate_versions(path: &Path, config: &Config) -> anyhow::Result<CrateVersi
                 continue;
             }
         };
-        vec.push(CrateVersion {
-            version,
-            checksum: line.checksum,
-        });
+
+        let version_matches = if let Some(ref dependency) = config.dependency {
+            line.deps.iter().any(|d| {
+                d.name == dependency
+                    && config
+                        .dependency_version
+                        .as_ref()
+                        .map(|version| match VersionReq::parse(d.req) {
+                            Ok(req) => req.matches(version),
+                            Err(e) => {
+                                warn!(version = %version, ?path, "{}", e);
+                                true
+                            }
+                        })
+                        .unwrap_or(true)
+            })
+        } else {
+            true
+        };
+
+        if version_matches {
+            vec.push(CrateVersion {
+                version,
+                checksum: line.checksum,
+            });
+        }
     }
 
     if config.latest && !vec.is_empty() {
