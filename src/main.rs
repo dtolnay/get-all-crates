@@ -73,6 +73,10 @@ struct Config {
     #[arg(long, requires = "dependency")]
     dependency_version: Option<Version>,
 
+    /// Whether to get versions where `dependency` is only a dev dependency
+    #[arg(long, requires = "dependency")]
+    include_dev_dependencies: bool,
+
     /// Limit number of concurrent requests in flight
     #[arg(short = 'j', value_name = "INT", default_value = "50")]
     max_concurrent_requests: NonZeroU32,
@@ -135,6 +139,7 @@ fn get_crate_versions(path: &Path, config: &Config) -> anyhow::Result<CrateVersi
     struct LenientDependency<'a> {
         name: &'a str,
         req: &'a str,
+        kind: &'a str,
     }
 
     #[derive(Deserialize)]
@@ -217,6 +222,7 @@ fn get_crate_versions(path: &Path, config: &Config) -> anyhow::Result<CrateVersi
                             }
                         })
                         .unwrap_or(true)
+                    && (config.include_dev_dependencies || d.kind == "normal")
             })
         } else {
             true
