@@ -365,9 +365,14 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
     let pb_style =
         ProgressStyle::with_template("{bar:60} ({pos}/{len}, ETA {eta}) {wide_msg}").unwrap();
 
+    let num_versions = versions
+        .iter()
+        .map(|krate| krate.versions.len())
+        .sum::<usize>();
+
     let span = Span::current();
     span.pb_set_style(&pb_style);
-    span.pb_set_length(versions.len() as u64);
+    span.pb_set_length(num_versions as u64);
 
     let iter = versions.iter().flat_map(|krate| {
         let dir = dir_for_crate(&config.output_path, &krate.name);
