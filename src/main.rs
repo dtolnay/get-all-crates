@@ -5,7 +5,6 @@
 )]
 
 mod crateversion;
-mod forbidden;
 
 use crate::crateversion::{Checksum, CrateVersion};
 use anyhow::bail;
@@ -322,10 +321,6 @@ async fn download_version(
     let resp = req.send().await?;
     let status = resp.status();
     if !status.is_success() {
-        // Some crates in the index are consistently broken...
-        if status == 403 && forbidden::known_broken(name, &vers.version) {
-            return Ok(None);
-        }
         bail!("{} {}", status, url_string);
     }
 
