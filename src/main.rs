@@ -12,7 +12,7 @@ use bytes::Bytes;
 use clap::Parser;
 use crypto_hash::{Algorithm, Hasher};
 use futures::stream::StreamExt;
-use indicatif::{ProgressBar, ProgressStyle};
+use indicatif::ProgressStyle;
 use memmap2::Mmap;
 use num_format::Locale;
 use parking_lot::Mutex;
@@ -28,9 +28,14 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn, Span};
+use tracing_indicatif::span_ext::IndicatifSpanExt;
+use tracing_indicatif::IndicatifLayer;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::filter::{Directive, LevelFilter};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 use url::Url;
 use walkdir::{DirEntry, WalkDir};
 
@@ -67,13 +72,21 @@ struct Config {
 }
 
 fn setup_tracing() {
+    let indicatif_layer = IndicatifLayer::new();
+
     let env_filter = EnvFilter::builder()
         .with_default_directive(Directive::from(LevelFilter::INFO))
         .from_env_lossy();
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
+
+    let log_layer = tracing_subscriber::fmt::layer()
         .without_time()
         .with_target(false)
+        .with_writer(indicatif_layer.get_stderr_writer())
+        .with_filter(env_filter);
+
+    tracing_subscriber::registry()
+        .with(log_layer)
+        .with(indicatif_layer)
         .init();
 }
 
@@ -307,7 +320,6 @@ async fn download_version(
     dir: PathBuf,
     name: &str,
     vers: &CrateVersion,
-    pb: ProgressBar,
 ) -> anyhow::Result<Option<Download>> {
     let mut output_path = dir;
     output_path.push(format!("{}-{}.crate", name, vers.version));
@@ -328,13 +340,11 @@ async fn download_version(
 
     let body = resp.bytes().await?;
 
-    pb.suspend(|| {
-        info!(
-            crate = %name,
-            version = %vers.version,
-            elapsed = ?millis(req_begin.elapsed()),
-        )
-    });
+    info!(
+        crate = %name,
+        version = %vers.version,
+        elapsed = ?millis(req_begin.elapsed()),
+    );
 
     Ok(Some(Download {
         output_path,
@@ -343,6 +353,7 @@ async fn download_version(
     }))
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
     let http_client = &reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
@@ -351,17 +362,18 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
         "downloading crates",
     );
 
-    let pb = ProgressBar::new(versions.len() as u64);
-    pb.set_style(
-        ProgressStyle::with_template("{bar:60} ({pos}/{len}, ETA {eta}) {wide_msg}").unwrap(),
-    );
+    let pb_style =
+        ProgressStyle::with_template("{bar:60} ({pos}/{len}, ETA {eta}) {wide_msg}").unwrap();
+
+    let span = Span::current();
+    span.pb_set_style(&pb_style);
+    span.pb_set_length(versions.len() as u64);
 
     let iter = versions.iter().flat_map(|krate| {
         let dir = dir_for_crate(&config.output_path, &krate.name);
-        let pb = pb.clone();
         krate.versions.iter().map(move |vers| {
-            pb.set_message(krate.name.clone());
-            download_version(http_client, dir.clone(), &krate.name, vers, pb.clone())
+            Span::current().pb_set_message(&krate.name);
+            download_version(http_client, dir.clone(), &krate.name, vers)
         })
     });
 
@@ -370,28 +382,23 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
         .for_each_concurrent(None, |download| async {
             match download {
                 Ok(Some(download)) => {
-                    let task = tokio::task::spawn_blocking({
-                        let pb = pb.clone();
-                        move || -> anyhow::Result<()> {
-                            if download.expected_checksum == checksum(&download.body) {
-                                fs::write(download.output_path, download.body)?;
-                            } else {
-                                pb.suspend(
-                                    || error!(path = ?download.output_path, "checksum mismatch"),
-                                );
-                            }
-                            Ok(())
+                    let task = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
+                        if download.expected_checksum == checksum(&download.body) {
+                            fs::write(download.output_path, download.body)?;
+                        } else {
+                            error!(path = ?download.output_path, "checksum mismatch");
                         }
+                        Ok(())
                     });
                     match task.await.map_err(anyhow::Error::new) {
                         Ok(Ok(())) => {}
-                        Ok(Err(err)) | Err(err) => pb.suspend(|| error!("{}", err)),
+                        Ok(Err(err)) | Err(err) => error!("{}", err),
                     }
                 }
                 Ok(None) => {}
-                Err(err) => pb.suspend(|| error!("{}", err)),
+                Err(err) => error!("{}", err),
             }
-            pb.inc(1);
+            Span::current().pb_inc(1);
         })
         .await;
 
