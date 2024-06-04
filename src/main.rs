@@ -12,6 +12,7 @@ use bytes::Bytes;
 use clap::Parser;
 use crypto_hash::{Algorithm, Hasher};
 use futures::stream::StreamExt;
+use indicatif::{ProgressBar, ProgressStyle};
 use memmap2::Mmap;
 use num_format::Locale;
 use parking_lot::Mutex;
@@ -306,6 +307,7 @@ async fn download_version(
     dir: PathBuf,
     name: &str,
     vers: &CrateVersion,
+    pb: ProgressBar,
 ) -> anyhow::Result<Option<Download>> {
     let mut output_path = dir;
     output_path.push(format!("{}-{}.crate", name, vers.version));
@@ -326,11 +328,13 @@ async fn download_version(
 
     let body = resp.bytes().await?;
 
-    info!(
-        crate = %name,
-        version = %vers.version,
-        elapsed = ?millis(req_begin.elapsed()),
-    );
+    pb.suspend(|| {
+        info!(
+            crate = %name,
+            version = %vers.version,
+            elapsed = ?millis(req_begin.elapsed()),
+        )
+    });
 
     Ok(Some(Download {
         output_path,
@@ -347,12 +351,18 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
         "downloading crates",
     );
 
+    let pb = ProgressBar::new(versions.len() as u64);
+    pb.set_style(
+        ProgressStyle::with_template("{bar:60} ({pos}/{len}, ETA {eta}) {wide_msg}").unwrap(),
+    );
+
     let iter = versions.iter().flat_map(|krate| {
         let dir = dir_for_crate(&config.output_path, &krate.name);
-        krate
-            .versions
-            .iter()
-            .map(move |vers| download_version(http_client, dir.clone(), &krate.name, vers))
+        let pb = pb.clone();
+        krate.versions.iter().map(move |vers| {
+            pb.set_message(krate.name.clone());
+            download_version(http_client, dir.clone(), &krate.name, vers, pb.clone())
+        })
     });
 
     futures::stream::iter(iter)
@@ -360,22 +370,28 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
         .for_each_concurrent(None, |download| async {
             match download {
                 Ok(Some(download)) => {
-                    let task = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-                        if download.expected_checksum == checksum(&download.body) {
-                            fs::write(download.output_path, download.body)?;
-                        } else {
-                            error!(path = ?download.output_path, "checksum mismatch");
+                    let task = tokio::task::spawn_blocking({
+                        let pb = pb.clone();
+                        move || -> anyhow::Result<()> {
+                            if download.expected_checksum == checksum(&download.body) {
+                                fs::write(download.output_path, download.body)?;
+                            } else {
+                                pb.suspend(
+                                    || error!(path = ?download.output_path, "checksum mismatch"),
+                                );
+                            }
+                            Ok(())
                         }
-                        Ok(())
                     });
                     match task.await.map_err(anyhow::Error::new) {
                         Ok(Ok(())) => {}
-                        Ok(Err(err)) | Err(err) => error!("{}", err),
+                        Ok(Err(err)) | Err(err) => pb.suspend(|| error!("{}", err)),
                     }
                 }
                 Ok(None) => {}
-                Err(err) => error!("{}", err),
+                Err(err) => pb.suspend(|| error!("{}", err)),
             }
+            pb.inc(1);
         })
         .await;
 
