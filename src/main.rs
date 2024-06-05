@@ -204,7 +204,12 @@ fn get_crate_versions(path: &Path, config: &Config) -> anyhow::Result<CrateVersi
     })
 }
 
-fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>> {
+struct AllCrateVersions {
+    vec: Vec<CrateVersions>,
+    count: u32,
+}
+
+fn get_all_crate_versions(config: &Config) -> anyhow::Result<AllCrateVersions> {
     let num_threads = thread::available_parallelism().map_or(1, NonZeroUsize::get);
     let thread_pool = ThreadPoolBuilder::new().num_threads(num_threads).build()?;
 
@@ -275,7 +280,10 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
         n_versions = %thousands(n_versions),
         "collected",
     );
-    Ok(crate_versions)
+    Ok(AllCrateVersions {
+        vec: crate_versions,
+        count: n_versions,
+    })
 }
 
 fn thousands(n: u32) -> impl Display {
@@ -354,7 +362,7 @@ async fn download_version(
 }
 
 #[instrument(skip_all, level = "debug")]
-async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
+async fn download_versions(config: &Config, versions: AllCrateVersions) -> anyhow::Result<()> {
     let http_client = &reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
     info!(
@@ -365,16 +373,11 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
     let pb_style =
         ProgressStyle::with_template("{bar:60} ({pos}/{len}, ETA {eta}) {wide_msg}").unwrap();
 
-    let num_versions = versions
-        .iter()
-        .map(|krate| krate.versions.len())
-        .sum::<usize>();
-
     let span = Span::current();
     span.pb_set_style(&pb_style);
-    span.pb_set_length(num_versions as u64);
+    span.pb_set_length(u64::from(versions.count));
 
-    let iter = versions.iter().flat_map(|krate| {
+    let iter = versions.vec.iter().flat_map(|krate| {
         let dir = dir_for_crate(&config.output_path, &krate.name);
         krate.versions.iter().map(move |vers| {
             Span::current().pb_set_message(&krate.name);
@@ -446,7 +449,9 @@ fn main() -> anyhow::Result<()> {
     let begin = Instant::now();
 
     let mut versions = get_all_crate_versions(&config)?;
-    versions.sort_unstable_by(|a, b| cmp_ignore_ascii_case(&a.name, &b.name));
+    versions
+        .vec
+        .sort_unstable_by(|a, b| cmp_ignore_ascii_case(&a.name, &b.name));
 
     let rt = tokio::runtime::Builder::new_multi_thread()
         .enable_all()
