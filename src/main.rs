@@ -12,6 +12,7 @@ use bytes::Bytes;
 use clap::Parser;
 use crypto_hash::{Algorithm, Hasher};
 use futures::stream::StreamExt;
+use indicatif::ProgressStyle;
 use memmap2::Mmap;
 use num_format::Locale;
 use parking_lot::Mutex;
@@ -27,9 +28,14 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
-use tracing::{error, info, warn};
+use tracing::{error, info, instrument, warn, Span};
+use tracing_indicatif::span_ext::IndicatifSpanExt;
+use tracing_indicatif::IndicatifLayer;
 use tracing_subscriber::filter::EnvFilter;
 use tracing_subscriber::filter::{Directive, LevelFilter};
+use tracing_subscriber::layer::SubscriberExt;
+use tracing_subscriber::util::SubscriberInitExt;
+use tracing_subscriber::Layer;
 use url::Url;
 use walkdir::{DirEntry, WalkDir};
 
@@ -66,13 +72,21 @@ struct Config {
 }
 
 fn setup_tracing() {
+    let indicatif_layer = IndicatifLayer::new();
+
     let env_filter = EnvFilter::builder()
         .with_default_directive(Directive::from(LevelFilter::INFO))
         .from_env_lossy();
-    tracing_subscriber::fmt()
-        .with_env_filter(env_filter)
+
+    let log_layer = tracing_subscriber::fmt::layer()
         .without_time()
         .with_target(false)
+        .with_writer(indicatif_layer.get_stderr_writer())
+        .with_filter(env_filter);
+
+    tracing_subscriber::registry()
+        .with(log_layer)
+        .with(indicatif_layer)
         .init();
 }
 
@@ -339,6 +353,7 @@ async fn download_version(
     }))
 }
 
+#[instrument(skip_all, level = "debug")]
 async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> anyhow::Result<()> {
     let http_client = &reqwest::Client::builder().user_agent(USER_AGENT).build()?;
 
@@ -347,12 +362,24 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
         "downloading crates",
     );
 
+    let pb_style =
+        ProgressStyle::with_template("{bar:60} ({pos}/{len}, ETA {eta}) {wide_msg}").unwrap();
+
+    let num_versions = versions
+        .iter()
+        .map(|krate| krate.versions.len())
+        .sum::<usize>();
+
+    let span = Span::current();
+    span.pb_set_style(&pb_style);
+    span.pb_set_length(num_versions as u64);
+
     let iter = versions.iter().flat_map(|krate| {
         let dir = dir_for_crate(&config.output_path, &krate.name);
-        krate
-            .versions
-            .iter()
-            .map(move |vers| download_version(http_client, dir.clone(), &krate.name, vers))
+        krate.versions.iter().map(move |vers| {
+            Span::current().pb_set_message(&krate.name);
+            download_version(http_client, dir.clone(), &krate.name, vers)
+        })
     });
 
     futures::stream::iter(iter)
@@ -376,6 +403,7 @@ async fn download_versions(config: &Config, versions: Vec<CrateVersions>) -> any
                 Ok(None) => {}
                 Err(err) => error!("{}", err),
             }
+            Span::current().pb_inc(1);
         })
         .await;
 
