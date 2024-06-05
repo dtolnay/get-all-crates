@@ -268,7 +268,7 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
     let crate_versions = crate_versions.into_inner();
     let n_versions = crate_versions
         .iter()
-        .map(|krate| krate.versions.len())
+        .map(|krate| krate.versions.len() as u32)
         .sum();
     info!(
         n_crates = %thousands(n_crates),
@@ -278,8 +278,8 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<Vec<CrateVersions>>
     Ok(crate_versions)
 }
 
-fn thousands(n: usize) -> impl Display {
-    struct Thousands(usize);
+fn thousands(n: u32) -> impl Display {
+    struct Thousands(u32);
 
     impl Display for Thousands {
         fn fmt(&self, formatter: &mut fmt::Formatter) -> fmt::Result {
