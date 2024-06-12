@@ -9,6 +9,7 @@ mod crateversion;
 use crate::crateversion::{Checksum, CrateVersion};
 use anyhow::bail;
 use bytes::Bytes;
+use bytesize::ByteSize;
 use clap::Parser;
 use crypto_hash::{Algorithm, Hasher};
 use futures::stream::StreamExt;
@@ -347,11 +348,13 @@ async fn download_version(
     }
 
     let body = resp.bytes().await?;
+    let size = ByteSize(body.len() as u64);
 
     info!(
         crate = %name,
         version = %vers.version,
         elapsed = ?millis(req_begin.elapsed()),
+        %size,
     );
 
     Ok(Some(Download {
