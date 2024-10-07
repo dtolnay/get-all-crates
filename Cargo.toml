@@ -1,6 +1,6 @@
 [package]
 name = "get-all-crates"
-version = "0.1.17"
+version = "0.1.18"
 authors = ["David Tolnay <dtolnay@gmail.com>"]
 description = "Download .crate files of all version of all crates from crates.io"
 edition = "2021"
