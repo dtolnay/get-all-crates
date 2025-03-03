@@ -1,5 +1,6 @@
 #![allow(
     clippy::cast_possible_truncation,
+    clippy::elidable_lifetime_names,
     clippy::match_single_binding,
     clippy::needless_lifetimes,
     clippy::unconditional_recursion, // https://github.com/rust-lang/rust-clippy/issues/12052
