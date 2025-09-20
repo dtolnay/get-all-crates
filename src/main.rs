@@ -346,7 +346,7 @@ async fn download_version(
     let resp = req.send().await?;
     let status = resp.status();
     if !status.is_success() {
-        bail!("{} {}", status, url_string);
+        bail!("{status} {url_string}");
     }
 
     let body = resp.bytes().await?;
