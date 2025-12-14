@@ -6,6 +6,7 @@ description = "Download .crate files of all version of all crates from crates.io
 edition = "2021"
 license = "MIT"
 repository = "https://github.com/dtolnay/get-all-crates"
+rust-version = "1.85"
 
 [dependencies]
 anyhow = "1.0.79"
