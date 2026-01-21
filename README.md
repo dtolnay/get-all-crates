@@ -26,7 +26,7 @@ $ git clone https://github.com/rust-lang/crates.io-index /path/to/index
 $ get-all-crates --index /path/to/index --out /path/to/crates
 ```
 
-Warning: as of 2022 this writes out more than 100 GB of crates.
+Warning: as of 2026 this writes out more than 300 GB of crates.
 
 The output directory structure is similar to how Cargo's registry index is
 structured:
