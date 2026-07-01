@@ -75,7 +75,7 @@ struct Config {
 }
 
 fn setup_tracing() {
-    let indicatif_layer = IndicatifLayer::new();
+    let indicatif_layer = IndicatifLayer::new().with_max_progress_bars(1, None);
 
     let env_filter = EnvFilter::builder()
         .with_default_directive(Directive::from(LevelFilter::INFO))
