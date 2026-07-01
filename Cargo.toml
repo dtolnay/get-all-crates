@@ -21,7 +21,7 @@ memmap2 = "0.9"
 num-format = "0.4"
 parking_lot = "0.12"
 rayon = "1"
-reqwest = { version = "0.13", default-features = false, features = ["brotli", "cookies", "deflate", "gzip", "json", "multipart", "rustls", "stream", "hickory-dns"] }
+reqwest = { version = "0.13", default-features = false, features = ["brotli", "deflate", "gzip", "rustls"] }
 semver = "1"
 serde = "1.0.194"
 serde_derive = "1.0.194"
@@ -32,9 +32,3 @@ tracing-indicatif = "0.3.10"
 tracing-subscriber = { version = "0.3", features = ["env-filter", "registry"] }
 url = "2"
 walkdir = "2.3"
-
-# Work around compilation problem in cookie crate.
-# https://github.com/rwf2/cookie-rs/issues/255
-# https://github.com/time-rs/time/issues/793
-[dependencies.time]
-version = "=0.3.51"
