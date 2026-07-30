@@ -124,11 +124,11 @@ fn verify_checksum(
     let actual_checksum = match File::open(crate_file_path)? {
         file => checksum(&unsafe { Mmap::map(&file) }?),
     };
-    if expected_checksum != actual_checksum {
+    if expected_checksum == actual_checksum {
+        Ok(ChecksumVerification::Match)
+    } else {
         error!(path = ?crate_file_path, "checksum mismatch");
         Ok(ChecksumVerification::Mismatch)
-    } else {
-        Ok(ChecksumVerification::Match)
     }
 }
 
