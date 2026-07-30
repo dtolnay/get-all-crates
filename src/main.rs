@@ -72,6 +72,10 @@ struct Config {
     /// Verify checksum of all previously downloaded crates
     #[arg(long)]
     verify: bool,
+
+    /// Delete and re-download existing .crate files with mismatched checksum.
+    #[arg(long, requires = "verify")]
+    replace_mismatch: bool,
 }
 
 fn setup_tracing() {
@@ -108,14 +112,24 @@ fn checksum(bytes: &[u8]) -> Checksum {
     checksum
 }
 
-fn verify_checksum(crate_file_path: &Path, expected_checksum: Checksum) -> io::Result<()> {
+enum ChecksumVerification {
+    Match,
+    Mismatch,
+}
+
+fn verify_checksum(
+    crate_file_path: &Path,
+    expected_checksum: Checksum,
+) -> io::Result<ChecksumVerification> {
     let actual_checksum = match File::open(crate_file_path)? {
         file => checksum(&unsafe { Mmap::map(&file) }?),
     };
     if expected_checksum != actual_checksum {
         error!(path = ?crate_file_path, "checksum mismatch");
+        Ok(ChecksumVerification::Mismatch)
+    } else {
+        Ok(ChecksumVerification::Match)
     }
-    Ok(())
 }
 
 fn get_crate_versions(path: &Path, config: &Config) -> anyhow::Result<CrateVersions> {
@@ -253,11 +267,17 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<AllCrateVersions> {
                     match path.try_exists() {
                         Ok(true) => {
                             if config.verify {
-                                if let Err(err) = verify_checksum(&path, vers.checksum) {
-                                    error!(?path, "{},", err);
+                                match verify_checksum(&path, vers.checksum) {
+                                    Ok(ChecksumVerification::Match) => false,
+                                    Ok(ChecksumVerification::Mismatch) => config.replace_mismatch,
+                                    Err(err) => {
+                                        error!(?path, "{},", err);
+                                        false
+                                    }
                                 }
+                            } else {
+                                false
                             }
-                            false
                         }
                         Ok(false) => true,
                         Err(err) => {
