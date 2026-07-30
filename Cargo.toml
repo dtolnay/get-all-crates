@@ -12,7 +12,7 @@ rust-version = "1.88"
 anyhow = "1.0.79"
 bytes = "1"
 bytesize = "2"
-clap = { version = "4", default-features = false, features = ["cargo", "color", "deprecated", "derive", "help", "std", "usage", "wrap_help"] }
+clap = { version = "4", default-features = false, features = ["cargo", "color", "deprecated", "derive", "help", "std", "suggestions", "usage", "wrap_help"] }
 crypto-hash = "0.3"
 futures = "0.3.7"
 hex = { version = "0.4", features = ["serde"] }
