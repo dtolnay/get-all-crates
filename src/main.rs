@@ -127,7 +127,6 @@ fn verify_checksum(
     if expected_checksum == actual_checksum {
         Ok(ChecksumVerification::Match)
     } else {
-        error!(path = ?crate_file_path, "checksum mismatch");
         Ok(ChecksumVerification::Mismatch)
     }
 }
@@ -269,7 +268,10 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<AllCrateVersions> {
                             if config.verify {
                                 match verify_checksum(&path, vers.checksum) {
                                     Ok(ChecksumVerification::Match) => false,
-                                    Ok(ChecksumVerification::Mismatch) => config.replace_mismatch,
+                                    Ok(ChecksumVerification::Mismatch) => {
+                                        error!(?path, "checksum mismatch");
+                                        config.replace_mismatch
+                                    }
                                     Err(err) => {
                                         error!(?path, "{},", err);
                                         false
