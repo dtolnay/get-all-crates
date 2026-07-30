@@ -73,7 +73,7 @@ struct Config {
     #[arg(long)]
     verify: bool,
 
-    /// Delete and re-download existing .crate files with mismatched checksum.
+    /// Delete and re-download existing .crate files with mismatched checksum
     #[arg(long, requires = "verify")]
     replace_mismatch: bool,
 }
