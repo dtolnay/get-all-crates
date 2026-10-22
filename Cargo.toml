@@ -19,7 +19,7 @@ hex = { version = "0.4", features = ["serde"] }
 indicatif = "0.18"
 memmap2 = "0.9"
 num-format = "0.4"
-parking_lot = "0.12"
+parking_lot = "0.13"
 rayon = "1"
 reqwest = { version = "0.13", default-features = false, features = ["brotli", "default-tls", "deflate", "gzip", "http2", "system-proxy"] }
 semver = "1"
