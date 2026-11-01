@@ -265,8 +265,8 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<AllCrateVersions> {
                     let path = output_dir.join(format!("{}-{}.crate", name, vers.version));
                     match path.try_exists() {
                         Ok(true) => {
-                            if config.verify {
-                                match verify_checksum(&path, vers.checksum) {
+                            config.verify
+                                && match verify_checksum(&path, vers.checksum) {
                                     Ok(ChecksumVerification::Match) => false,
                                     Ok(ChecksumVerification::Mismatch) => {
                                         error!(?path, "checksum mismatch");
@@ -277,9 +277,6 @@ fn get_all_crate_versions(config: &Config) -> anyhow::Result<AllCrateVersions> {
                                         false
                                     }
                                 }
-                            } else {
-                                false
-                            }
                         }
                         Ok(false) => true,
                         Err(err) => {
