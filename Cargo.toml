@@ -10,7 +10,6 @@ rust-version = "1.95"
 
 [dependencies]
 anyhow = "1.0.79"
-bytes = "1"
 bytesize = "2"
 clap = { version = "4", default-features = false, features = ["cargo", "color", "deprecated", "derive", "help", "std", "suggestions", "usage", "wrap_help"] }
 crypto-hash = "0.3"
@@ -26,6 +25,7 @@ semver = "1"
 serde = "1.0.194"
 serde_derive = "1.0.194"
 serde_json = "1.0.110"
+tempfile = "3"
 tokio = { version = "1.21", features = ["full"] }
 tracing = "0.1.29"
 tracing-indicatif = "0.3.10"
