@@ -44,6 +44,11 @@ use walkdir::{DirEntry, WalkDir};
 
 const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
 
+/// Maximum number of downloaded crates held in memory while waiting to be
+/// written to disk. Once reached, no new downloads are started until writes
+/// catch up, so memory stays bounded when storage is slower than the network.
+const MAX_PENDING_WRITES: usize = 64;
+
 struct CrateVersions {
     name: String,
     versions: Vec<CrateVersion>,
@@ -411,7 +416,7 @@ async fn download_versions(config: &Config, versions: AllCrateVersions) -> anyho
 
     futures::stream::iter(iter)
         .buffer_unordered(config.max_concurrent_requests.get() as usize)
-        .for_each_concurrent(None, |download| async {
+        .for_each_concurrent(MAX_PENDING_WRITES, |download| async {
             match download {
                 Ok(Some(download)) => {
                     let task = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
