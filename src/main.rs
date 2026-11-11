@@ -10,7 +10,6 @@ mod crateversion;
 
 use crate::crateversion::{Checksum, CrateVersion};
 use anyhow::bail;
-use bytes::Bytes;
 use bytesize::ByteSize;
 use clap::Parser;
 use crypto_hash::{Algorithm, Hasher};
@@ -31,6 +30,8 @@ use std::num::{NonZeroU32, NonZeroUsize};
 use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::{Duration, Instant};
+use tokio::io::AsyncWriteExt;
+use tokio::task::spawn_blocking;
 use tracing::{error, info, instrument, warn, Span};
 use tracing_indicatif::span_ext::IndicatifSpanExt;
 use tracing_indicatif::IndicatifLayer;
@@ -43,6 +44,11 @@ use url::Url;
 use walkdir::{DirEntry, WalkDir};
 
 const USER_AGENT: &str = concat!("dtolnay/get-all-crates/v", env!("CARGO_PKG_VERSION"));
+
+/// Maximum buffer size for writing a downloaded crate to disk. Crates have a
+/// median size of 31 KiB (p90 328 KiB), so 256 KiB fits most of them (~85-90%)
+/// in a single write.
+const WRITE_BUFFER_SIZE: usize = 256 * 1024;
 
 struct CrateVersions {
     name: String,
@@ -339,20 +345,14 @@ fn dir_for_crate(output_path: &Path, name: &str) -> PathBuf {
     path
 }
 
-struct Download {
-    output_path: PathBuf,
-    body: Bytes,
-    expected_checksum: Checksum,
-}
-
 async fn download_version(
     http_client: &reqwest::Client,
     dir: PathBuf,
     name: &str,
     vers: &CrateVersion,
-) -> anyhow::Result<Option<Download>> {
-    let mut output_path = dir;
-    output_path.push(format!("{}-{}.crate", name, vers.version));
+) -> anyhow::Result<()> {
+    let file_name = format!("{}-{}.crate", name, vers.version);
+    let output_path = dir.join(&file_name);
 
     let url_string = format!(
         "https://static.crates.io/crates/{name}/{name}-{version}.crate",
@@ -368,21 +368,69 @@ async fn download_version(
         bail!("{status} {url_string}");
     }
 
-    let body = resp.bytes().await?;
-    let size = ByteSize(body.len() as u64);
+    // Stream the body into a temporary file next to its final location so that
+    // memory use stays bounded by the number of concurrent requests, regardless
+    // of how fast the disk is. The temporary file is deleted when `temp_path` is
+    // dropped, unless it has been persisted under its final name.
+    let (file, temp_path) = spawn_blocking(move || {
+        let prefix = format!(".{file_name}.");
+        let mut builder = tempfile::Builder::new();
+        builder.prefix(&prefix).suffix(".part");
+        // tempfile defaults to 0o600, which `persist` keeps. Match the 0o644
+        // (minus umask) that a plain `fs::write` would have produced.
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            builder.permissions(fs::Permissions::from_mode(0o644));
+        }
+        builder.tempfile_in(dir)
+    })
+    .await??
+    .into_parts();
+
+    let (checksum, len) = stream_to_file(resp, tokio::fs::File::from_std(file)).await?;
+    if checksum != vers.checksum {
+        error!(path = ?output_path, "checksum mismatch");
+        return Ok(());
+    }
+    spawn_blocking(move || temp_path.persist(output_path)).await??;
 
     info!(
         crate = %name,
         version = %vers.version,
         elapsed = ?millis(req_begin.elapsed()),
-        %size,
+        size = %ByteSize(len),
     );
 
-    Ok(Some(Download {
-        output_path,
-        body,
-        expected_checksum: vers.checksum,
-    }))
+    Ok(())
+}
+
+async fn stream_to_file(
+    mut resp: reqwest::Response,
+    file: tokio::fs::File,
+) -> anyhow::Result<(Checksum, u64)> {
+    // Coalesce small (~16 KiB) network chunks into fewer blocking writes, and
+    // don't allocate more than the body needs when its size is known.
+    let capacity = resp
+        .content_length()
+        .and_then(|len| usize::try_from(len).ok())
+        .map_or(WRITE_BUFFER_SIZE, |len| len.min(WRITE_BUFFER_SIZE));
+
+    let mut file = tokio::io::BufWriter::with_capacity(capacity, file);
+    let mut hasher = Hasher::new(Algorithm::SHA256);
+
+    let mut len = 0;
+    while let Some(chunk) = resp.chunk().await? {
+        hasher.write_all(&chunk)?;
+        file.write_all(&chunk).await?;
+        len += chunk.len() as u64;
+    }
+    file.flush().await?;
+    drop(file);
+
+    let mut checksum = [0; 32];
+    checksum.copy_from_slice(&hasher.finish());
+    Ok((checksum, len))
 }
 
 #[instrument(skip_all, level = "debug")]
@@ -403,35 +451,23 @@ async fn download_versions(config: &Config, versions: AllCrateVersions) -> anyho
 
     let iter = versions.vec.iter().flat_map(|krate| {
         let dir = dir_for_crate(&config.output_path, &krate.name);
-        krate.versions.iter().map(move |vers| {
-            Span::current().pb_set_message(&krate.name);
-            download_version(http_client, dir.clone(), &krate.name, vers)
-        })
+        krate
+            .versions
+            .iter()
+            .map(move |vers| (krate, dir.clone(), vers))
     });
 
     futures::stream::iter(iter)
-        .buffer_unordered(config.max_concurrent_requests.get() as usize)
-        .for_each_concurrent(None, |download| async {
-            match download {
-                Ok(Some(download)) => {
-                    let task = tokio::task::spawn_blocking(move || -> anyhow::Result<()> {
-                        if download.expected_checksum == checksum(&download.body) {
-                            fs::write(download.output_path, download.body)?;
-                        } else {
-                            error!(path = ?download.output_path, "checksum mismatch");
-                        }
-                        Ok(())
-                    });
-                    match task.await.map_err(anyhow::Error::new) {
-                        Ok(Ok(())) => {}
-                        Ok(Err(err)) | Err(err) => error!("{}", err),
-                    }
+        .for_each_concurrent(
+            config.max_concurrent_requests.get() as usize,
+            |(krate, dir, vers)| async move {
+                Span::current().pb_set_message(&krate.name);
+                if let Err(err) = download_version(http_client, dir, &krate.name, vers).await {
+                    error!(crate = %krate.name, version = %vers.version, "{}", err);
                 }
-                Ok(None) => {}
-                Err(err) => error!("{}", err),
-            }
-            Span::current().pb_inc(1);
-        })
+                Span::current().pb_inc(1);
+            },
+        )
         .await;
 
     Ok(())
